@@ -25,7 +25,13 @@ export function registerMatrixMonitorEvents(params: {
     onRoomMessage,
   } = params;
 
-  client.on("room.message", onRoomMessage);
+  console.log("[DEBUG] Matrix plugin: registering room.message event handler");
+  client.on("room.message", async (roomId: string, event: MatrixRawEvent) => {
+    console.log(
+      `[DEBUG] Matrix plugin: room.message received - roomId=${roomId} eventId=${event?.event_id} sender=${event?.sender}`,
+    );
+    await onRoomMessage(roomId, event);
+  });
 
   client.on("room.encrypted_event", (roomId: string, event: MatrixRawEvent) => {
     const eventId = event?.event_id ?? "unknown";

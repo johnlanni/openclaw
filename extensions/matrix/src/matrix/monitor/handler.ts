@@ -114,8 +114,15 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
 
   return async (roomId: string, event: MatrixRawEvent) => {
     try {
+      console.log(
+        `[DEBUG] Matrix handler: processing event - roomId=${roomId} eventId=${event?.event_id} type=${event?.type}`,
+      );
       const eventType = event.type;
+      console.log(
+        `[DEBUG] Matrix handler: eventType=${eventType} RoomMessage=${EventType.RoomMessage}`,
+      );
       if (eventType === EventType.RoomMessageEncrypted) {
+        console.log(`[DEBUG] Matrix handler: skipping encrypted event`);
         // Encrypted messages are decrypted automatically by @vector-im/matrix-bot-sdk with crypto enabled
         return;
       }
@@ -125,35 +132,51 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
       const isLocationEvent =
         eventType === EventType.Location ||
         (eventType === EventType.RoomMessage && locationContent.msgtype === EventType.Location);
+      console.log(`[DEBUG] Matrix handler: isPoll=${isPollEvent} isLocation=${isLocationEvent}`);
       if (eventType !== EventType.RoomMessage && !isPollEvent && !isLocationEvent) {
+        console.log(`[DEBUG] Matrix handler: returning - event type mismatch`);
         return;
       }
+      console.log(`[DEBUG] Matrix handler: passed type check`);
       logVerboseMessage(
         `matrix: room.message recv room=${roomId} type=${eventType} id=${event.event_id ?? "unknown"}`,
       );
       if (event.unsigned?.redacted_because) {
+        console.log(`[DEBUG] Matrix handler: returning - redacted`);
         return;
       }
+      console.log(`[DEBUG] Matrix handler: passed redacted check`);
       const senderId = event.sender;
       if (!senderId) {
+        console.log(`[DEBUG] Matrix handler: returning - no senderId`);
         return;
       }
+      console.log(`[DEBUG] Matrix handler: passed sender check - senderId=${senderId}`);
       const selfUserId = await client.getUserId();
       if (senderId === selfUserId) {
+        console.log(`[DEBUG] Matrix handler: returning - sender is self`);
         return;
       }
+      console.log(`[DEBUG] Matrix handler: passed self-sender check`);
       const eventTs = event.origin_server_ts;
       const eventAge = event.unsigned?.age;
+      console.log(
+        `[DEBUG] Matrix handler: eventTs=${eventTs} startupMs=${startupMs} startupGraceMs=${startupGraceMs}`,
+      );
       if (typeof eventTs === "number" && eventTs < startupMs - startupGraceMs) {
+        console.log(`[DEBUG] Matrix handler: returning - event too old (ts check)`);
         return;
       }
+      console.log(`[DEBUG] Matrix handler: passed ts check`);
       if (
         typeof eventTs !== "number" &&
         typeof eventAge === "number" &&
         eventAge > startupGraceMs
       ) {
+        console.log(`[DEBUG] Matrix handler: returning - event too old (age check)`);
         return;
       }
+      console.log(`[DEBUG] Matrix handler: passed age check`);
 
       const roomInfo = await getRoomInfo(roomId);
       const roomName = roomInfo.name;
@@ -197,6 +220,9 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
         selfUserId,
       });
       const isRoom = !isDirectMessage;
+      console.log(
+        `[DEBUG] Matrix handler: DM check - isDirectMessage=${isDirectMessage} isRoom=${isRoom} roomId=${roomId} sender=${senderId}`,
+      );
 
       if (isRoom && groupPolicy === "disabled") {
         return;
@@ -241,10 +267,17 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
       const effectiveGroupAllowFrom = normalizeMatrixAllowList(groupAllowFrom);
       const groupAllowConfigured = effectiveGroupAllowFrom.length > 0;
 
+      console.log(
+        `[DEBUG] Matrix handler: about to check isDirectMessage=${isDirectMessage} dmEnabled=${dmEnabled} dmPolicy=${dmPolicy}`,
+      );
+
       if (isDirectMessage) {
+        console.log(`[DEBUG] Matrix handler: processing as DM`);
         if (!dmEnabled || dmPolicy === "disabled") {
+          console.log(`[DEBUG] Matrix handler: returning - DM disabled`);
           return;
         }
+        console.log(`[DEBUG] Matrix handler: passed DM enabled check`);
         if (dmPolicy !== "open") {
           const allowMatch = resolveMatrixAllowListMatch({
             allowList: effectiveAllowFrom,
