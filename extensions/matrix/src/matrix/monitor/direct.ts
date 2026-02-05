@@ -78,14 +78,9 @@ export function createDirectRoomTracker(client: MatrixClient, opts: DirectRoomTr
       const { roomId, senderId } = params;
       await refreshDmCache();
 
+      // Check explicit DM markers first
       if (client.dms.isDm(roomId)) {
         log(`matrix: dm detected via m.direct room=${roomId}`);
-        return true;
-      }
-
-      const memberCount = await resolveMemberCount(roomId);
-      if (memberCount === 2) {
-        log(`matrix: dm detected via member count room=${roomId} members=${memberCount}`);
         return true;
       }
 
@@ -97,6 +92,9 @@ export function createDirectRoomTracker(client: MatrixClient, opts: DirectRoomTr
         return true;
       }
 
+      // Only use member count as fallback if no explicit DM markers are present
+      // This allows 2-person rooms to be treated as rooms rather than DMs
+      const memberCount = await resolveMemberCount(roomId);
       log(`matrix: dm check room=${roomId} result=group members=${memberCount ?? "unknown"}`);
       return false;
     },
