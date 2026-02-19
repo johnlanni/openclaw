@@ -1,11 +1,15 @@
 import type { LocationMessageEventContent, MatrixClient } from "@vector-im/matrix-bot-sdk";
 import {
+  buildPendingHistoryContextFromMap,
+  clearHistoryEntriesIfEnabled,
   createReplyPrefixContext,
   createTypingCallbacks,
   formatAllowlistMatchMeta,
   logInboundDrop,
   logTypingFailure,
+  recordPendingHistoryEntryIfEnabled,
   resolveControlCommandGate,
+  type HistoryEntry,
   type RuntimeEnv,
 } from "openclaw/plugin-sdk";
 import type { CoreConfig, ReplyToMode } from "../../types.js";
@@ -85,6 +89,8 @@ export type MatrixMonitorHandlerParams = {
     roomId: string,
   ) => Promise<{ name?: string; canonicalAlias?: string; altAliases: string[] }>;
   getMemberDisplayName: (roomId: string, userId: string) => Promise<string>;
+  historyLimit: number;
+  roomHistories: Map<string, HistoryEntry[]>;
 };
 
 export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParams) {
@@ -110,6 +116,8 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
     directTracker,
     getRoomInfo,
     getMemberDisplayName,
+    historyLimit,
+    roomHistories,
   } = params;
 
   return async (roomId: string, event: MatrixRawEvent) => {
@@ -469,6 +477,17 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
       const canDetectMention = mentionRegexes.length > 0 || hasExplicitMention;
       if (isRoom && shouldRequireMention && !wasMentioned && !shouldBypassMention) {
         logger.info({ roomId, reason: "no-mention" }, "skipping room message");
+        recordPendingHistoryEntryIfEnabled({
+          historyMap: roomHistories,
+          historyKey: roomId,
+          limit: historyLimit,
+          entry: {
+            sender: senderName,
+            body: bodyText,
+            timestamp: eventTs ?? undefined,
+            messageId: event.event_id ?? undefined,
+          },
+        });
         return;
       }
 
@@ -509,9 +528,28 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
         body: textWithId,
       });
 
+      let combinedBody = body;
+      const historyKey = isRoom ? roomId : undefined;
+      if (isRoom && historyKey) {
+        combinedBody = buildPendingHistoryContextFromMap({
+          historyMap: roomHistories,
+          historyKey,
+          limit: historyLimit,
+          currentMessage: combinedBody,
+          formatEntry: (entry) =>
+            core.channel.reply.formatAgentEnvelope({
+              channel: "Matrix",
+              from: roomName ?? roomId,
+              timestamp: entry.timestamp,
+              body: `${entry.sender}: ${entry.body}${entry.messageId ? ` [id:${entry.messageId}]` : ""}`,
+              envelope: envelopeOptions,
+            }),
+        });
+      }
+
       const groupSystemPrompt = roomConfig?.systemPrompt?.trim() || undefined;
       const ctxPayload = core.channel.reply.finalizeInboundContext({
-        Body: body,
+        Body: combinedBody,
         RawBody: bodyText,
         CommandBody: bodyText,
         From: isDirectMessage ? `matrix:${senderId}` : `matrix:channel:${roomId}`,
@@ -673,6 +711,13 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
       });
       markDispatchIdle();
       if (!queuedFinal) {
+        if (isRoom && historyKey) {
+          clearHistoryEntriesIfEnabled({
+            historyMap: roomHistories,
+            historyKey,
+            limit: historyLimit,
+          });
+        }
         return;
       }
       didSendReply = true;
@@ -680,6 +725,13 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
       logVerboseMessage(
         `matrix: delivered ${finalCount} reply${finalCount === 1 ? "" : "ies"} to ${replyTarget}`,
       );
+      if (isRoom && historyKey) {
+        clearHistoryEntriesIfEnabled({
+          historyMap: roomHistories,
+          historyKey,
+          limit: historyLimit,
+        });
+      }
       if (didSendReply) {
         const previewText = bodyText.replace(/\s+/g, " ").slice(0, 160);
         core.system.enqueueSystemEvent(`Matrix message from ${senderName}: ${previewText}`, {

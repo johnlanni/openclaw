@@ -1,5 +1,11 @@
 import { format } from "node:util";
-import { mergeAllowlist, summarizeMapping, type RuntimeEnv } from "openclaw/plugin-sdk";
+import {
+  DEFAULT_GROUP_HISTORY_LIMIT,
+  mergeAllowlist,
+  summarizeMapping,
+  type HistoryEntry,
+  type RuntimeEnv,
+} from "openclaw/plugin-sdk";
 import type { CoreConfig, ReplyToMode } from "../../types.js";
 import { resolveMatrixTargets } from "../../resolve-targets.js";
 import { getMatrixRuntime } from "../../runtime.js";
@@ -252,6 +258,15 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
   const startupMs = Date.now();
   const startupGraceMs = 600000; // Allow messages from 600 seconds before startup to be processed
   const directTracker = createDirectRoomTracker(client, { log: logVerboseMessage });
+  const matrixCfg = cfg.channels?.matrix;
+  const historyLimit = Math.max(
+    0,
+    matrixCfg?.historyLimit ??
+      (cfg as { messages?: { groupChat?: { historyLimit?: number } } }).messages?.groupChat
+        ?.historyLimit ??
+      DEFAULT_GROUP_HISTORY_LIMIT,
+  );
+  const roomHistories = new Map<string, HistoryEntry[]>();
   registerMatrixAutoJoin({ client, cfg, runtime });
   const warnedEncryptedRooms = new Set<string>();
   const warnedCryptoMissingRooms = new Set<string>();
@@ -279,6 +294,8 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
     directTracker,
     getRoomInfo,
     getMemberDisplayName,
+    historyLimit,
+    roomHistories,
   });
 
   registerMatrixMonitorEvents({
