@@ -475,6 +475,11 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
         commandAuthorized &&
         hasControlCommandInMessage;
       const canDetectMention = mentionRegexes.length > 0 || hasExplicitMention;
+
+      console.log(
+        `[DEBUG] Matrix handler mention check: isRoom=${isRoom} shouldRequireMention=${shouldRequireMention} wasMentioned=${wasMentioned} hasExplicitMention=${hasExplicitMention} canDetectMention=${canDetectMention} mentionRegexes.length=${mentionRegexes.length} roomConfig?.requireMention=${roomConfig?.requireMention}`,
+      );
+
       if (isRoom && shouldRequireMention && !wasMentioned && !shouldBypassMention) {
         logger.info({ roomId, reason: "no-mention" }, "skipping room message");
         recordPendingHistoryEntryIfEnabled({

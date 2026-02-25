@@ -20,6 +20,11 @@ export function resolveMentions(params: {
   const mentionedUsers = Array.isArray(mentions?.user_ids)
     ? new Set(mentions.user_ids)
     : new Set<string>();
+
+  console.log(
+    `[DEBUG] resolveMentions (inbound): userId=${params.userId} m.mentions=${JSON.stringify(mentions)} mentionedUsers=${JSON.stringify(Array.from(mentionedUsers))} mentionRegexes.length=${params.mentionRegexes.length}`,
+  );
+
   const wasMentioned =
     Boolean(mentions?.room) ||
     (params.userId ? mentionedUsers.has(params.userId) : false) ||
@@ -27,5 +32,10 @@ export function resolveMentions(params: {
       params.text ?? "",
       params.mentionRegexes,
     );
+
+  console.log(
+    `[DEBUG] resolveMentions (inbound): wasMentioned=${wasMentioned} hasExplicitMention=${Boolean(mentions)} text="${(params.text ?? "").slice(0, 100)}..."`,
+  );
+
   return { wasMentioned, hasExplicitMention: Boolean(mentions) };
 }

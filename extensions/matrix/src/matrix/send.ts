@@ -39,7 +39,11 @@ const MATRIX_USER_ID_REGEX = /@[a-zA-Z0-9._=\-/]+:[a-zA-Z0-9.-]+(?::\d+)?/g;
  */
 function extractMentionsFromText(text: string): string[] {
   const matches = text.match(MATRIX_USER_ID_REGEX);
-  return matches ? [...new Set(matches)] : [];
+  const result = matches ? [...new Set(matches)] : [];
+  console.log(
+    `[DEBUG] extractMentionsFromText: text="${text.slice(0, 100)}..." matches=${JSON.stringify(result)}`,
+  );
+  return result;
 }
 
 /**
@@ -65,13 +69,16 @@ function resolveMentions(
   }
 
   if (userIds.size === 0 && !explicitMentions?.room) {
+    console.log(`[DEBUG] resolveMentions: no mentions found, returning undefined`);
     return undefined;
   }
 
-  return {
+  const result = {
     user_ids: Array.from(userIds),
     room: explicitMentions?.room,
   };
+  console.log(`[DEBUG] resolveMentions: result=${JSON.stringify(result)}`);
+  return result;
 }
 
 export type { MatrixSendOpts, MatrixSendResult } from "./send/types.js";
@@ -183,7 +190,11 @@ export async function sendMessageMatrix(
         if (!text) {
           continue;
         }
-        const content = buildTextContent(text, relation, resolveMentions(text, opts.mentions));
+        const mentions = resolveMentions(text, opts.mentions);
+        const content = buildTextContent(text, relation, mentions);
+        console.log(
+          `[DEBUG] sendMessageMatrix: sending to=${to} text="${text.slice(0, 100)}..." m.mentions=${JSON.stringify(content["m.mentions"])}`,
+        );
         const eventId = await sendContent(content);
         lastMessageId = eventId ?? lastMessageId;
       }
