@@ -32,16 +32,20 @@ const MATRIX_TEXT_LIMIT = 4000;
 const getCore = () => getMatrixRuntime();
 
 // Regex to match Matrix user IDs in text: @username:domain
-const MATRIX_USER_ID_REGEX = /@[a-zA-Z0-9._=\-/]+:[a-zA-Z0-9.-]+(?::\d+)?/g;
+// Matrix user IDs can contain: a-z, A-Z, 0-9, ., _, -, =, /, +
+// Homeserver can be domain:port or domain
+const MATRIX_USER_ID_REGEX = /@[a-zA-Z0-9._=+/\-]+:[a-zA-Z0-9.-]+(?::\d+)?/g;
 
 /**
  * Extract Matrix user IDs from text that look like @mentions
  */
 function extractMentionsFromText(text: string): string[] {
+  // Reset regex lastIndex for global regex
+  MATRIX_USER_ID_REGEX.lastIndex = 0;
   const matches = text.match(MATRIX_USER_ID_REGEX);
   const result = matches ? [...new Set(matches)] : [];
   console.log(
-    `[DEBUG] extractMentionsFromText: text="${text.slice(0, 100)}..." matches=${JSON.stringify(result)}`,
+    `[DEBUG] extractMentionsFromText: text="${text.slice(0, 200)}..." matches=${JSON.stringify(result)} matchCount=${result.length}`,
   );
   return result;
 }

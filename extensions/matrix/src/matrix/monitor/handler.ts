@@ -121,9 +121,15 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
   } = params;
 
   return async (roomId: string, event: MatrixRawEvent) => {
+    const handlerStartTime = Date.now();
+    const eventId = event?.event_id ?? "unknown";
+    const senderId = event?.sender ?? "unknown";
+    console.log(
+      `[DEBUG] ========== Matrix handler START ========== eventId=${eventId} sender=${senderId}`,
+    );
     try {
       console.log(
-        `[DEBUG] Matrix handler: processing event - roomId=${roomId} eventId=${event?.event_id} type=${event?.type}`,
+        `[DEBUG] Matrix handler: processing event - roomId=${roomId} eventId=${eventId} type=${event?.type}`,
       );
       const eventType = event.type;
       console.log(
@@ -332,12 +338,19 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
       }
 
       const roomUsers = roomConfig?.users ?? [];
+      console.log(
+        `[DEBUG] Matrix handler: roomUsers check - isRoom=${isRoom} roomUsers.length=${roomUsers.length} sender=${senderId}`,
+      );
       if (isRoom && roomUsers.length > 0) {
         const userMatch = resolveMatrixAllowListMatch({
           allowList: normalizeMatrixAllowList(roomUsers),
           userId: senderId,
         });
+        console.log(
+          `[DEBUG] Matrix handler: roomUsers match result for ${senderId} - allowed=${userMatch.allowed}`,
+        );
         if (!userMatch.allowed) {
+          console.log(`[DEBUG] Matrix handler: returning - sender ${senderId} not in roomUsers`);
           logVerboseMessage(
             `matrix: blocked sender ${senderId} (room users allowlist, ${roomMatchMeta}, ${formatAllowlistMatchMeta(
               userMatch,
@@ -347,11 +360,20 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
         }
       }
       if (isRoom && groupPolicy === "allowlist" && roomUsers.length === 0 && groupAllowConfigured) {
+        console.log(
+          `[DEBUG] Matrix handler: checking groupAllowFrom for sender=${senderId} groupAllowFrom=${JSON.stringify(effectiveGroupAllowFrom)}`,
+        );
         const groupAllowMatch = resolveMatrixAllowListMatch({
           allowList: effectiveGroupAllowFrom,
           userId: senderId,
         });
+        console.log(
+          `[DEBUG] Matrix handler: groupAllowMatch result for ${senderId} - allowed=${groupAllowMatch.allowed}`,
+        );
         if (!groupAllowMatch.allowed) {
+          console.log(
+            `[DEBUG] Matrix handler: returning - sender ${senderId} not in groupAllowFrom`,
+          );
           logVerboseMessage(
             `matrix: blocked sender ${senderId} (groupAllowFrom, ${roomMatchMeta}, ${formatAllowlistMatchMeta(
               groupAllowMatch,
@@ -407,6 +429,10 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
       if (!bodyText) {
         return;
       }
+
+      console.log(
+        `[DEBUG] Matrix handler: bodyText="${bodyText.slice(0, 200)}..." selfUserId=${selfUserId} mentionRegexes=[${mentionRegexes.map((r) => r.source).join(", ")}]`,
+      );
 
       const { wasMentioned, hasExplicitMention } = resolveMentions({
         content,
@@ -745,7 +771,13 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
         });
       }
     } catch (err) {
+      console.log(
+        `[DEBUG] Matrix handler ERROR for eventId=${eventId} sender=${senderId}: ${String(err)}`,
+      );
       runtime.error?.(`matrix handler failed: ${String(err)}`);
     }
+    console.log(
+      `[DEBUG] ========== Matrix handler END ========== eventId=${eventId} sender=${senderId} duration=${Date.now() - handlerStartTime}ms`,
+    );
   };
 }
