@@ -276,9 +276,13 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
       const storeAllowFrom = await core.channel.pairing
         .readAllowFromStore("matrix")
         .catch(() => []);
-      const effectiveAllowFrom = normalizeMatrixAllowList([...allowFrom, ...storeAllowFrom]);
-      const groupAllowFrom = cfg.channels?.matrix?.groupAllowFrom ?? [];
-      const effectiveGroupAllowFrom = normalizeMatrixAllowList(groupAllowFrom);
+
+      // Hot-reload allowlist configs from config file (supports dynamic worker addition)
+      const hotCfg = core.config.loadConfig() as CoreConfig;
+      const hotGroupAllowFrom = hotCfg.channels?.matrix?.groupAllowFrom ?? [];
+      const hotDmAllowFrom = hotCfg.channels?.matrix?.dm?.allowFrom ?? [];
+      const effectiveGroupAllowFrom = normalizeMatrixAllowList(hotGroupAllowFrom);
+      const effectiveAllowFrom = normalizeMatrixAllowList([...hotDmAllowFrom, ...storeAllowFrom]);
       const groupAllowConfigured = effectiveGroupAllowFrom.length > 0;
 
       console.log(
