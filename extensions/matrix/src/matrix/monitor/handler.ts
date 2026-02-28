@@ -131,6 +131,7 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
       console.log(
         `[DEBUG] Matrix handler: processing event - roomId=${roomId} eventId=${eventId} type=${event?.type}`,
       );
+      console.log(`[DEBUG] Matrix handler: raw event: ${JSON.stringify(event, null, 2)}`);
       const eventType = event.type;
       console.log(
         `[DEBUG] Matrix handler: eventType=${eventType} RoomMessage=${EventType.RoomMessage}`,
@@ -404,6 +405,9 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
           ? content.file
           : undefined;
       const mediaUrl = contentUrl ?? contentFile?.url;
+      console.log(
+        `[DEBUG] Matrix handler: media detection - msgtype=${content.msgtype} contentUrl=${contentUrl} hasFile=${"file" in content} contentFileUrl=${contentFile?.url} mediaUrl=${mediaUrl} contentKeys=${Object.keys(content).join(",")}`,
+      );
       if (!rawBody && !mediaUrl) {
         return;
       }
