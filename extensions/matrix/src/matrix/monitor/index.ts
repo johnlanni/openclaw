@@ -1,4 +1,6 @@
 import {
+  createLoggerBackedRuntime,
+  DEFAULT_GROUP_HISTORY_LIMIT,
   GROUP_POLICY_BLOCKED_LABEL,
   mergeAllowlist,
   resolveRuntimeEnv,
@@ -6,6 +8,7 @@ import {
   resolveDefaultGroupPolicy,
   summarizeMapping,
   warnMissingProviderGroupPolicyFallbackOnce,
+  type HistoryEntry,
   type RuntimeEnv,
 } from "openclaw/plugin-sdk/matrix";
 import { resolveMatrixTargets } from "../../resolve-targets.js";
@@ -321,7 +324,15 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
   const mediaMaxMb = opts.mediaMaxMb ?? accountConfig.mediaMaxMb ?? DEFAULT_MEDIA_MAX_MB;
   const mediaMaxBytes = Math.max(1, mediaMaxMb) * 1024 * 1024;
   const startupMs = Date.now();
-  const startupGraceMs = DEFAULT_STARTUP_GRACE_MS;
+  const startupGraceMs = 600000; // 10 min grace window to catch recent messages after restart
+  const historyLimit = Math.max(
+    0,
+    accountConfig.historyLimit ??
+      (cfg as { messages?: { groupChat?: { historyLimit?: number } } }).messages?.groupChat
+        ?.historyLimit ??
+      DEFAULT_GROUP_HISTORY_LIMIT,
+  );
+  const roomHistories = new Map<string, HistoryEntry[]>();
   const directTracker = createDirectRoomTracker(client, {
     log: logVerboseMessage,
     includeMemberCountInLogs: core.logging.shouldLogVerbose(),
@@ -354,6 +365,8 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
     getRoomInfo,
     getMemberDisplayName,
     accountId: opts.accountId,
+    historyLimit,
+    roomHistories,
   });
 
   registerMatrixMonitorEvents({

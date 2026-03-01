@@ -115,6 +115,8 @@ describe("createMatrixRoomMessageHandler BodyForAgent sender label", () => {
       }),
       getMemberDisplayName: vi.fn().mockResolvedValue("Bu"),
       accountId: undefined,
+      historyLimit: 0,
+      roomHistories: new Map(),
     });
 
     const event = {
