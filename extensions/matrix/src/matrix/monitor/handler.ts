@@ -121,23 +121,16 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
   } = params;
 
   return async (roomId: string, event: MatrixRawEvent) => {
-    const handlerStartTime = Date.now();
+
     const eventId = event?.event_id ?? "unknown";
     const senderId = event?.sender ?? "unknown";
-    console.log(
-      `[DEBUG] ========== Matrix handler START ========== eventId=${eventId} sender=${senderId}`,
-    );
+
     try {
-      console.log(
-        `[DEBUG] Matrix handler: processing event - roomId=${roomId} eventId=${eventId} type=${event?.type}`,
-      );
-      console.log(`[DEBUG] Matrix handler: raw event: ${JSON.stringify(event, null, 2)}`);
+
       const eventType = event.type;
-      console.log(
-        `[DEBUG] Matrix handler: eventType=${eventType} RoomMessage=${EventType.RoomMessage}`,
-      );
+
       if (eventType === EventType.RoomMessageEncrypted) {
-        console.log(`[DEBUG] Matrix handler: skipping encrypted event`);
+
         // Encrypted messages are decrypted automatically by @vector-im/matrix-bot-sdk with crypto enabled
         return;
       }
@@ -147,51 +140,48 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
       const isLocationEvent =
         eventType === EventType.Location ||
         (eventType === EventType.RoomMessage && locationContent.msgtype === EventType.Location);
-      console.log(`[DEBUG] Matrix handler: isPoll=${isPollEvent} isLocation=${isLocationEvent}`);
+
       if (eventType !== EventType.RoomMessage && !isPollEvent && !isLocationEvent) {
-        console.log(`[DEBUG] Matrix handler: returning - event type mismatch`);
+
         return;
       }
-      console.log(`[DEBUG] Matrix handler: passed type check`);
+
       logVerboseMessage(
         `matrix: room.message recv room=${roomId} type=${eventType} id=${event.event_id ?? "unknown"}`,
       );
       if (event.unsigned?.redacted_because) {
-        console.log(`[DEBUG] Matrix handler: returning - redacted`);
+
         return;
       }
-      console.log(`[DEBUG] Matrix handler: passed redacted check`);
+
       const senderId = event.sender;
       if (!senderId) {
-        console.log(`[DEBUG] Matrix handler: returning - no senderId`);
+
         return;
       }
-      console.log(`[DEBUG] Matrix handler: passed sender check - senderId=${senderId}`);
+
       const selfUserId = await client.getUserId();
       if (senderId === selfUserId) {
-        console.log(`[DEBUG] Matrix handler: returning - sender is self`);
+
         return;
       }
-      console.log(`[DEBUG] Matrix handler: passed self-sender check`);
+
       const eventTs = event.origin_server_ts;
       const eventAge = event.unsigned?.age;
-      console.log(
-        `[DEBUG] Matrix handler: eventTs=${eventTs} startupMs=${startupMs} startupGraceMs=${startupGraceMs}`,
-      );
+
       if (typeof eventTs === "number" && eventTs < startupMs - startupGraceMs) {
-        console.log(`[DEBUG] Matrix handler: returning - event too old (ts check)`);
+
         return;
       }
-      console.log(`[DEBUG] Matrix handler: passed ts check`);
+
       if (
         typeof eventTs !== "number" &&
         typeof eventAge === "number" &&
         eventAge > startupGraceMs
       ) {
-        console.log(`[DEBUG] Matrix handler: returning - event too old (age check)`);
+
         return;
       }
-      console.log(`[DEBUG] Matrix handler: passed age check`);
 
       const roomInfo = await getRoomInfo(roomId);
       const roomName = roomInfo.name;
@@ -235,9 +225,6 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
         selfUserId,
       });
       const isRoom = !isDirectMessage;
-      console.log(
-        `[DEBUG] Matrix handler: DM check - isDirectMessage=${isDirectMessage} isRoom=${isRoom} roomId=${roomId} sender=${senderId}`,
-      );
 
       if (isRoom && groupPolicy === "disabled") {
         return;
@@ -286,17 +273,13 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
       const effectiveAllowFrom = normalizeMatrixAllowList([...hotDmAllowFrom, ...storeAllowFrom]);
       const groupAllowConfigured = effectiveGroupAllowFrom.length > 0;
 
-      console.log(
-        `[DEBUG] Matrix handler: about to check isDirectMessage=${isDirectMessage} dmEnabled=${dmEnabled} dmPolicy=${dmPolicy}`,
-      );
-
       if (isDirectMessage) {
-        console.log(`[DEBUG] Matrix handler: processing as DM`);
+
         if (!dmEnabled || dmPolicy === "disabled") {
-          console.log(`[DEBUG] Matrix handler: returning - DM disabled`);
+
           return;
         }
-        console.log(`[DEBUG] Matrix handler: passed DM enabled check`);
+
         if (dmPolicy !== "open") {
           const allowMatch = resolveMatrixAllowListMatch({
             allowList: effectiveAllowFrom,
@@ -343,19 +326,15 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
       }
 
       const roomUsers = roomConfig?.users ?? [];
-      console.log(
-        `[DEBUG] Matrix handler: roomUsers check - isRoom=${isRoom} roomUsers.length=${roomUsers.length} sender=${senderId}`,
-      );
+
       if (isRoom && roomUsers.length > 0) {
         const userMatch = resolveMatrixAllowListMatch({
           allowList: normalizeMatrixAllowList(roomUsers),
           userId: senderId,
         });
-        console.log(
-          `[DEBUG] Matrix handler: roomUsers match result for ${senderId} - allowed=${userMatch.allowed}`,
-        );
+
         if (!userMatch.allowed) {
-          console.log(`[DEBUG] Matrix handler: returning - sender ${senderId} not in roomUsers`);
+
           logVerboseMessage(
             `matrix: blocked sender ${senderId} (room users allowlist, ${roomMatchMeta}, ${formatAllowlistMatchMeta(
               userMatch,
@@ -365,20 +344,14 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
         }
       }
       if (isRoom && groupPolicy === "allowlist" && roomUsers.length === 0 && groupAllowConfigured) {
-        console.log(
-          `[DEBUG] Matrix handler: checking groupAllowFrom for sender=${senderId} groupAllowFrom=${JSON.stringify(effectiveGroupAllowFrom)}`,
-        );
+
         const groupAllowMatch = resolveMatrixAllowListMatch({
           allowList: effectiveGroupAllowFrom,
           userId: senderId,
         });
-        console.log(
-          `[DEBUG] Matrix handler: groupAllowMatch result for ${senderId} - allowed=${groupAllowMatch.allowed}`,
-        );
+
         if (!groupAllowMatch.allowed) {
-          console.log(
-            `[DEBUG] Matrix handler: returning - sender ${senderId} not in groupAllowFrom`,
-          );
+
           logVerboseMessage(
             `matrix: blocked sender ${senderId} (groupAllowFrom, ${roomMatchMeta}, ${formatAllowlistMatchMeta(
               groupAllowMatch,
@@ -405,9 +378,7 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
           ? content.file
           : undefined;
       const mediaUrl = contentUrl ?? contentFile?.url;
-      console.log(
-        `[DEBUG] Matrix handler: media detection - msgtype=${content.msgtype} contentUrl=${contentUrl} hasFile=${"file" in content} contentFileUrl=${contentFile?.url} mediaUrl=${mediaUrl} contentKeys=${Object.keys(content).join(",")}`,
-      );
+
       if (!rawBody && !mediaUrl) {
         return;
       }
@@ -437,10 +408,6 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
       if (!bodyText) {
         return;
       }
-
-      console.log(
-        `[DEBUG] Matrix handler: bodyText="${bodyText.slice(0, 200)}..." selfUserId=${selfUserId} mentionRegexes=[${mentionRegexes.map((r) => r.source).join(", ")}]`,
-      );
 
       const { wasMentioned, hasExplicitMention } = resolveMentions({
         content,
@@ -509,10 +476,6 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
         commandAuthorized &&
         hasControlCommandInMessage;
       const canDetectMention = mentionRegexes.length > 0 || hasExplicitMention;
-
-      console.log(
-        `[DEBUG] Matrix handler mention check: isRoom=${isRoom} shouldRequireMention=${shouldRequireMention} wasMentioned=${wasMentioned} hasExplicitMention=${hasExplicitMention} canDetectMention=${canDetectMention} mentionRegexes.length=${mentionRegexes.length} roomConfig?.requireMention=${roomConfig?.requireMention}`,
-      );
 
       if (isRoom && shouldRequireMention && !wasMentioned && !shouldBypassMention) {
         logger.info({ roomId, reason: "no-mention" }, "skipping room message");
@@ -779,13 +742,9 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
         });
       }
     } catch (err) {
-      console.log(
-        `[DEBUG] Matrix handler ERROR for eventId=${eventId} sender=${senderId}: ${String(err)}`,
-      );
+
       runtime.error?.(`matrix handler failed: ${String(err)}`);
     }
-    console.log(
-      `[DEBUG] ========== Matrix handler END ========== eventId=${eventId} sender=${senderId} duration=${Date.now() - handlerStartTime}ms`,
-    );
+
   };
 }
