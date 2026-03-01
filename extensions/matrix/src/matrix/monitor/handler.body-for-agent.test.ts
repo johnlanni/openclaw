@@ -94,6 +94,8 @@ describe("createMatrixRoomMessageHandler BodyForAgent sender label", () => {
       logger,
       logVerboseMessage,
       allowFrom: [],
+      rawIdAllowFrom: [],
+      rawIdGroupAllowFrom: [],
       roomsConfig: undefined,
       mentionRegexes: [],
       groupPolicy: "open",
