@@ -16,18 +16,72 @@ type EncryptedFile = {
   v: string;
 };
 
+/**
+ * Parse an mxc:// URL into server name and media ID
+ * mxc://server.name:port/mediaId -> { serverName: "server.name:port", mediaId: "mediaId" }
+ */
+function parseMxcUrl(mxcUrl: string): { serverName: string; mediaId: string } | null {
+  const match = mxcUrl.match(/^mxc:\/\/([^/]+)\/(.+)$/);
+  if (!match) {
+    return null;
+  }
+  return { serverName: match[1], mediaId: match[2] };
+}
+
 async function fetchMatrixMediaBuffer(params: {
   client: MatrixClient;
   mxcUrl: string;
   maxBytes: number;
 }): Promise<{ buffer: Buffer; headerType?: string } | null> {
-  // @vector-im/matrix-bot-sdk provides mxcToHttp helper
-  const url = params.client.mxcToHttp(params.mxcUrl);
-  if (!url) {
+  const parsed = parseMxcUrl(params.mxcUrl);
+  if (!parsed) {
+    throw new Error(`Invalid mxc:// URL: ${params.mxcUrl}`);
+  }
+
+  // Get the homeserver URL from the client (mxcToHttp returns a full HTTP URL)
+  const httpUrl = await params.client.mxcToHttp(params.mxcUrl);
+  if (!httpUrl) {
     return null;
   }
 
-  // Use the client's download method which handles auth
+  // Extract base URL from the HTTP URL
+  const urlObj = new URL(httpUrl);
+  const baseUrl = `${urlObj.protocol}//${urlObj.host}`;
+
+  // Try the authenticated media endpoint first (MSC3916)
+  // This is required when homeserver has unauthenticated media disabled
+  const authMediaUrl = `${baseUrl}/_matrix/client/v1/media/download/${parsed.serverName}/${parsed.mediaId}`;
+
+  // Get access token from config since MatrixClient doesn't expose it directly
+  const cfg = getMatrixRuntime().config.loadConfig();
+  const matrixCfg = cfg.channels?.matrix;
+  const accessToken = matrixCfg?.accessToken;
+
+  if (accessToken) {
+    try {
+      const response = await fetch(authMediaUrl, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+
+      if (response.ok) {
+        const arrayBuffer = await response.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+
+        if (buffer.byteLength > params.maxBytes) {
+          throw new Error("Matrix media exceeds configured size limit");
+        }
+
+        const contentType = response.headers.get("content-type") ?? undefined;
+        return { buffer, headerType: contentType };
+      }
+    } catch {
+      // Fall through to fallback
+    }
+  }
+
+  // Fall back to the client's downloadContent method (uses unauthenticated endpoint)
   try {
     const buffer = await params.client.downloadContent(params.mxcUrl);
     if (buffer.byteLength > params.maxBytes) {
