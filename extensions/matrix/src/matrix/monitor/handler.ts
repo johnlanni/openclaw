@@ -43,7 +43,7 @@ import {
 } from "./inbound-body.js";
 import { resolveMatrixLocation, type MatrixLocationPayload } from "./location.js";
 import { downloadMatrixMedia } from "./media.js";
-import { resolveMentions } from "./mentions.js";
+import { resolveMentions, stripMatrixMentionForCommand } from "./mentions.js";
 import { deliverMatrixReplies } from "./replies.js";
 import { resolveMatrixRoomConfig } from "./rooms.js";
 import { resolveMatrixThreadRootId, resolveMatrixThreadTarget } from "./threads.js";
@@ -481,7 +481,15 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
               userId: senderId,
             })
           : false;
-      const hasControlCommandInMessage = core.channel.text.hasControlCommand(bodyText, cfg);
+      const textForCommandDetection = stripMatrixMentionForCommand(
+        bodyText,
+        selfUserId,
+        mentionRegexes,
+      );
+      const hasControlCommandInMessage = core.channel.text.hasControlCommand(
+        textForCommandDetection,
+        cfg,
+      );
       const commandGate = resolveControlCommandGate({
         useAccessGroups,
         authorizers: [
@@ -666,7 +674,7 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
         Body: combinedBody,
         BodyForAgent: bodyForAgent,
         RawBody: bodyText,
-        CommandBody: bodyText,
+        CommandBody: stripMatrixMentionForCommand(bodyText, selfUserId, mentionRegexes),
         From: isDirectMessage ? `matrix:${senderId}` : `matrix:channel:${roomId}`,
         To: `room:${roomId}`,
         SessionKey: route.sessionKey,
