@@ -21,10 +21,6 @@ export function resolveMentions(params: {
     ? new Set(mentions.user_ids)
     : new Set<string>();
 
-  console.log(
-    `[DEBUG] resolveMentions (inbound): userId=${params.userId} m.mentions=${JSON.stringify(mentions)} mentionedUsers=${JSON.stringify(Array.from(mentionedUsers))} mentionRegexes.length=${params.mentionRegexes.length}`,
-  );
-
   const wasMentioned =
     Boolean(mentions?.room) ||
     (params.userId ? mentionedUsers.has(params.userId) : false) ||
@@ -33,9 +29,33 @@ export function resolveMentions(params: {
       params.mentionRegexes,
     );
 
-  console.log(
-    `[DEBUG] resolveMentions (inbound): wasMentioned=${wasMentioned} hasExplicitMention=${Boolean(mentions)} text="${(params.text ?? "").slice(0, 100)}..."`,
-  );
-
   return { wasMentioned, hasExplicitMention: Boolean(mentions) };
+}
+
+/**
+ * Strip Matrix mention prefix from message text so slash commands can be matched.
+ * Handles both MXID format (@user:server) and display name mentions.
+ */
+export function stripMatrixMentionForCommand(
+  text: string,
+  selfUserId: string | null | undefined,
+  mentionRegexes: RegExp[],
+): string {
+  let result = text;
+
+  // Strip @userid:server at start (Matrix MXID format)
+  if (selfUserId) {
+    const escaped = selfUserId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    result = result.replace(new RegExp(`^${escaped}\\s*`, "i"), "");
+  }
+
+  // Strip display name mentions (from mentionRegexes) at start
+  for (const re of mentionRegexes) {
+    const startRe = new RegExp(`^(?:${re.source})\\s*`, re.flags);
+    const before = result;
+    result = result.replace(startRe, "");
+    if (result !== before) break; // Only strip the first match
+  }
+
+  return result.trim();
 }

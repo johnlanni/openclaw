@@ -33,7 +33,7 @@ import {
 } from "./allowlist.js";
 import { resolveMatrixLocation, type MatrixLocationPayload } from "./location.js";
 import { downloadMatrixMedia } from "./media.js";
-import { resolveMentions } from "./mentions.js";
+import { resolveMentions, stripMatrixMentionForCommand } from "./mentions.js";
 import { deliverMatrixReplies } from "./replies.js";
 import { resolveMatrixRoomConfig } from "./rooms.js";
 import { resolveMatrixThreadRootId, resolveMatrixThreadTarget } from "./threads.js";
@@ -121,16 +121,13 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
   } = params;
 
   return async (roomId: string, event: MatrixRawEvent) => {
-
     const eventId = event?.event_id ?? "unknown";
     const senderId = event?.sender ?? "unknown";
 
     try {
-
       const eventType = event.type;
 
       if (eventType === EventType.RoomMessageEncrypted) {
-
         // Encrypted messages are decrypted automatically by @vector-im/matrix-bot-sdk with crypto enabled
         return;
       }
@@ -142,7 +139,6 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
         (eventType === EventType.RoomMessage && locationContent.msgtype === EventType.Location);
 
       if (eventType !== EventType.RoomMessage && !isPollEvent && !isLocationEvent) {
-
         return;
       }
 
@@ -150,19 +146,16 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
         `matrix: room.message recv room=${roomId} type=${eventType} id=${event.event_id ?? "unknown"}`,
       );
       if (event.unsigned?.redacted_because) {
-
         return;
       }
 
       const senderId = event.sender;
       if (!senderId) {
-
         return;
       }
 
       const selfUserId = await client.getUserId();
       if (senderId === selfUserId) {
-
         return;
       }
 
@@ -170,7 +163,6 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
       const eventAge = event.unsigned?.age;
 
       if (typeof eventTs === "number" && eventTs < startupMs - startupGraceMs) {
-
         return;
       }
 
@@ -179,7 +171,6 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
         typeof eventAge === "number" &&
         eventAge > startupGraceMs
       ) {
-
         return;
       }
 
@@ -274,9 +265,7 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
       const groupAllowConfigured = effectiveGroupAllowFrom.length > 0;
 
       if (isDirectMessage) {
-
         if (!dmEnabled || dmPolicy === "disabled") {
-
           return;
         }
 
@@ -334,7 +323,6 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
         });
 
         if (!userMatch.allowed) {
-
           logVerboseMessage(
             `matrix: blocked sender ${senderId} (room users allowlist, ${roomMatchMeta}, ${formatAllowlistMatchMeta(
               userMatch,
@@ -344,14 +332,12 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
         }
       }
       if (isRoom && groupPolicy === "allowlist" && roomUsers.length === 0 && groupAllowConfigured) {
-
         const groupAllowMatch = resolveMatrixAllowListMatch({
           allowList: effectiveGroupAllowFrom,
           userId: senderId,
         });
 
         if (!groupAllowMatch.allowed) {
-
           logVerboseMessage(
             `matrix: blocked sender ${senderId} (groupAllowFrom, ${roomMatchMeta}, ${formatAllowlistMatchMeta(
               groupAllowMatch,
@@ -437,7 +423,15 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
               userId: senderId,
             })
           : false;
-      const hasControlCommandInMessage = core.channel.text.hasControlCommand(bodyText, cfg);
+      const textForCommandDetection = stripMatrixMentionForCommand(
+        bodyText,
+        selfUserId,
+        mentionRegexes,
+      );
+      const hasControlCommandInMessage = core.channel.text.hasControlCommand(
+        textForCommandDetection,
+        cfg,
+      );
       const commandGate = resolveControlCommandGate({
         useAccessGroups,
         authorizers: [
@@ -553,7 +547,7 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
       const ctxPayload = core.channel.reply.finalizeInboundContext({
         Body: combinedBody,
         RawBody: bodyText,
-        CommandBody: bodyText,
+        CommandBody: stripMatrixMentionForCommand(bodyText, selfUserId, mentionRegexes),
         From: isDirectMessage ? `matrix:${senderId}` : `matrix:channel:${roomId}`,
         To: `room:${roomId}`,
         SessionKey: route.sessionKey,
@@ -742,9 +736,7 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
         });
       }
     } catch (err) {
-
       runtime.error?.(`matrix handler failed: ${String(err)}`);
     }
-
   };
 }
