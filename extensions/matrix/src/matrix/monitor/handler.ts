@@ -431,8 +431,9 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
         selfDisplayName,
       );
       if (textForCommandDetection !== bodyText) {
-        logVerboseMessage(
-          `matrix: stripped mention for command detection: "${bodyText}" → "${textForCommandDetection}"`,
+        logger.info(
+          { roomId, original: bodyText, stripped: textForCommandDetection },
+          "stripped mention for command detection",
         );
       }
       const hasControlCommandInMessage = core.channel.text.hasControlCommand(
