@@ -252,6 +252,7 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
       }
 
       const senderName = await getMemberDisplayName(roomId, senderId);
+      const selfDisplayName = await getMemberDisplayName(roomId, selfUserId).catch(() => null);
       const storeAllowFrom = await core.channel.pairing
         .readAllowFromStore("matrix")
         .catch(() => []);
@@ -427,7 +428,13 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
         bodyText,
         selfUserId,
         mentionRegexes,
+        selfDisplayName,
       );
+      if (textForCommandDetection !== bodyText) {
+        logVerboseMessage(
+          `matrix: stripped mention for command detection: "${bodyText}" → "${textForCommandDetection}"`,
+        );
+      }
       const hasControlCommandInMessage = core.channel.text.hasControlCommand(
         textForCommandDetection,
         cfg,
@@ -547,7 +554,12 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
       const ctxPayload = core.channel.reply.finalizeInboundContext({
         Body: combinedBody,
         RawBody: bodyText,
-        CommandBody: stripMatrixMentionForCommand(bodyText, selfUserId, mentionRegexes),
+        CommandBody: stripMatrixMentionForCommand(
+          bodyText,
+          selfUserId,
+          mentionRegexes,
+          selfDisplayName,
+        ),
         From: isDirectMessage ? `matrix:${senderId}` : `matrix:channel:${roomId}`,
         To: `room:${roomId}`,
         SessionKey: route.sessionKey,

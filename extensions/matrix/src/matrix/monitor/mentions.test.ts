@@ -40,4 +40,23 @@ describe("stripMatrixMentionForCommand", () => {
   it("handles empty mentionRegexes", () => {
     expect(stripMatrixMentionForCommand("@openclaw:example.org /new", selfUserId, [])).toBe("/new");
   });
+
+  it("strips selfDisplayName at start", () => {
+    expect(stripMatrixMentionForCommand("mathworker 💕: /stop", null, [], "mathworker 💕")).toBe(
+      "/stop",
+    );
+    expect(stripMatrixMentionForCommand("mathworker 💕 /new", null, [], "mathworker 💕")).toBe(
+      "/new",
+    );
+  });
+
+  it("strips selfDisplayName with colon separator", () => {
+    expect(stripMatrixMentionForCommand("MyBot: /help", null, [], "MyBot")).toBe("/help");
+  });
+
+  it("does not strip selfDisplayName from middle of text", () => {
+    expect(
+      stripMatrixMentionForCommand("hello mathworker 💕 /stop", null, [], "mathworker 💕"),
+    ).toBe("hello mathworker 💕 /stop");
+  });
 });
