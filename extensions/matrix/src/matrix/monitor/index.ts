@@ -275,8 +275,18 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
     .filter((s) => s && s !== "*" && isMatrixUserId(s))
     .map(normalizeMatrixUserId);
 
-  allowFrom = await resolveMatrixUserAllowlist({ cfg, runtime, label: "matrix dm allowlist", list: allowFrom });
-  groupAllowFrom = await resolveMatrixUserAllowlist({ cfg, runtime, label: "matrix group allowlist", list: groupAllowFrom });
+  allowFrom = await resolveMatrixUserAllowlist({
+    cfg,
+    runtime,
+    label: "matrix dm allowlist",
+    list: allowFrom,
+  });
+  groupAllowFrom = await resolveMatrixUserAllowlist({
+    cfg,
+    runtime,
+    label: "matrix group allowlist",
+    list: groupAllowFrom,
+  });
 
   if (roomsConfig && Object.keys(roomsConfig).length > 0) {
     const mapping: string[] = [];
@@ -344,7 +354,12 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
       if (users.length === 0) {
         continue;
       }
-      const resolvedUsers = await resolveMatrixUserAllowlist({ cfg, runtime, label: `matrix room users (${roomKey})`, list: users });
+      const resolvedUsers = await resolveMatrixUserAllowlist({
+        cfg,
+        runtime,
+        label: `matrix room users (${roomKey})`,
+        list: users,
+      });
       if (resolvedUsers !== users) {
         nextRooms[roomKey] = { ...roomConfig, users: resolvedUsers };
       }

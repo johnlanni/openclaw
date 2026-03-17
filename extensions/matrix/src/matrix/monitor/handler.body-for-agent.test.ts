@@ -9,6 +9,18 @@ import {
 } from "./handler.js";
 import { EventType, type MatrixRawEvent } from "./types.js";
 
+vi.mock("openclaw/plugin-sdk/matrix", async (importOriginal) => {
+  const mod = (await importOriginal()) as Record<string, unknown>;
+  return {
+    ...mod,
+    resolveInboundSessionEnvelopeContext: vi.fn().mockReturnValue({
+      storePath: "/tmp/openclaw-test-session.json",
+      envelopeOptions: {},
+      previousTimestamp: undefined,
+    }),
+  };
+});
+
 describe("createMatrixRoomMessageHandler BodyForAgent sender label", () => {
   beforeEach(() => {
     // Initialize Matrix runtime with minimal mocks needed for handler
