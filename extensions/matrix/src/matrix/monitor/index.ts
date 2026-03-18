@@ -426,7 +426,7 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
   const mediaMaxMb = opts.mediaMaxMb ?? accountConfig.mediaMaxMb ?? DEFAULT_MEDIA_MAX_MB;
   const mediaMaxBytes = Math.max(1, mediaMaxMb) * 1024 * 1024;
   const startupMs = Date.now();
-  const startupGraceMs = 600000; // 10 min grace window to catch recent messages after restart
+  const startupGraceMs = 60000; // 1 min grace window to catch recent messages after restart
   const historyLimit = Math.max(
     0,
     accountConfig.historyLimit ??
