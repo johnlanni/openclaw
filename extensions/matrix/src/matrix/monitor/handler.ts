@@ -548,6 +548,8 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
             body: bodyText,
             timestamp: eventTs ?? undefined,
             messageId: event.event_id ?? undefined,
+            mediaPath: media?.path,
+            mediaType: media?.contentType,
           },
         });
         return;
@@ -660,14 +662,16 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
           historyKey,
           limit: historyLimit,
           currentMessage: combinedBody,
-          formatEntry: (entry) =>
-            core.channel.reply.formatAgentEnvelope({
+          formatEntry: (entry) => {
+            const mediaTag = entry.mediaPath ? ` [media:${entry.mediaPath}]` : "";
+            return core.channel.reply.formatAgentEnvelope({
               channel: "Matrix",
               from: roomName ?? roomId,
               timestamp: entry.timestamp,
-              body: `${entry.sender}: ${entry.body}${entry.messageId ? ` [id:${entry.messageId}]` : ""}`,
+              body: `${entry.sender}: ${entry.body}${mediaTag}${entry.messageId ? ` [id:${entry.messageId}]` : ""}`,
               envelope: envelopeOptions,
-            }),
+            });
+          },
         });
       }
 

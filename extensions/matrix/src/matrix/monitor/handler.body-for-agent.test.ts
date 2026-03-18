@@ -9,7 +9,7 @@ import {
 } from "./handler.js";
 import { EventType, type MatrixRawEvent } from "./types.js";
 
-vi.mock("../../../runtime-api.js", async (importOriginal) => {
+vi.mock("openclaw/plugin-sdk/matrix", async (importOriginal) => {
   const mod = (await importOriginal()) as Record<string, unknown>;
   return {
     ...mod,
