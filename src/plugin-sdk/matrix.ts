@@ -104,6 +104,13 @@ export { runPluginCommandWithTimeout } from "./run-command.js";
 export { dispatchReplyFromConfigWithSettledDispatcher } from "./inbound-reply-dispatch.js";
 export { createLoggerBackedRuntime, resolveRuntimeEnv } from "./runtime.js";
 export { resolveInboundSessionEnvelopeContext } from "../channels/session-envelope.js";
+export type { HistoryEntry } from "../auto-reply/reply/history.js";
+export {
+  DEFAULT_GROUP_HISTORY_LIMIT,
+  buildPendingHistoryContextFromMap,
+  clearHistoryEntriesIfEnabled,
+  recordPendingHistoryEntryIfEnabled,
+} from "../auto-reply/reply/history.js";
 export {
   buildProbeChannelStatusSummary,
   collectStatusIssuesFromLastError,

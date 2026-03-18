@@ -1,6 +1,7 @@
 import type { MatrixClient } from "@vector-im/matrix-bot-sdk";
 import type { PluginRuntime, RuntimeEnv, RuntimeLogger } from "openclaw/plugin-sdk/matrix";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { setMatrixRuntime } from "../../runtime.js";
 import {
   createMatrixRoomMessageHandler,
   resolveMatrixBaseRouteSession,
@@ -8,7 +9,38 @@ import {
 } from "./handler.js";
 import { EventType, type MatrixRawEvent } from "./types.js";
 
+vi.mock("../../../runtime-api.js", async (importOriginal) => {
+  const mod = (await importOriginal()) as Record<string, unknown>;
+  return {
+    ...mod,
+    resolveInboundSessionEnvelopeContext: vi.fn().mockReturnValue({
+      storePath: "/tmp/openclaw-test-session.json",
+      envelopeOptions: {},
+      previousTimestamp: undefined,
+    }),
+  };
+});
+
 describe("createMatrixRoomMessageHandler BodyForAgent sender label", () => {
+  beforeEach(() => {
+    // Initialize Matrix runtime with minimal mocks needed for handler
+    setMatrixRuntime({
+      config: { loadConfig: vi.fn().mockReturnValue({}) },
+      state: {
+        resolveStateDir: vi.fn().mockReturnValue("/tmp/openclaw-test"),
+      },
+      channel: {
+        mentions: {
+          matchesMentionPatterns: vi.fn().mockReturnValue(false),
+        },
+      },
+    } as unknown as PluginRuntime);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("stores sender-labeled BodyForAgent for group thread messages", async () => {
     const recordInboundSession = vi.fn().mockResolvedValue(undefined);
     const formatInboundEnvelope = vi
@@ -19,6 +51,9 @@ describe("createMatrixRoomMessageHandler BodyForAgent sender label", () => {
       .mockImplementation((ctx: Record<string, unknown>) => ctx);
 
     const core = {
+      config: {
+        loadConfig: vi.fn().mockReturnValue({}),
+      },
       channel: {
         pairing: {
           readAllowFromStore: vi.fn().mockResolvedValue([]),
@@ -94,6 +129,8 @@ describe("createMatrixRoomMessageHandler BodyForAgent sender label", () => {
       logger,
       logVerboseMessage,
       allowFrom: [],
+      rawIdAllowFrom: [],
+      rawIdGroupAllowFrom: [],
       roomsConfig: undefined,
       mentionRegexes: [],
       groupPolicy: "open",
@@ -115,6 +152,8 @@ describe("createMatrixRoomMessageHandler BodyForAgent sender label", () => {
       }),
       getMemberDisplayName: vi.fn().mockResolvedValue("Bu"),
       accountId: undefined,
+      historyLimit: 0,
+      roomHistories: new Map(),
     });
 
     const event = {
