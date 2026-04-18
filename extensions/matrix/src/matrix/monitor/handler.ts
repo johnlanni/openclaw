@@ -13,6 +13,7 @@ import type {
   MatrixStreamingMode,
   ReplyToMode,
 } from "../../types.js";
+import { resolveMatrixAccountConfig } from "../account-config.js";
 import { createMatrixDraftStream } from "../draft-stream.js";
 import { formatMatrixErrorMessage } from "../errors.js";
 import { isMatrixMediaSizeLimitError } from "../media-errors.js";
@@ -40,13 +41,14 @@ import {
 } from "../send.js";
 import { MATRIX_OPENCLAW_FINALIZED_PREVIEW_KEY } from "../send/types.js";
 import { resolveMatrixStoredSessionMeta } from "../session-store-metadata.js";
+import { isMatrixQualifiedUserId } from "../target-ids.js";
 import { resolveMatrixMonitorAccessState } from "./access-state.js";
 import { resolveMatrixAckReactionConfig } from "./ack-config.js";
-import { resolveMatrixAllowListMatch } from "./allowlist.js";
+import { normalizeMatrixUserId, resolveMatrixAllowListMatch } from "./allowlist.js";
 import type { MatrixInboundEventDeduper } from "./inbound-dedupe.js";
 import { resolveMatrixLocation, type MatrixLocationPayload } from "./location.js";
 import { downloadMatrixMedia } from "./media.js";
-import { resolveMentions } from "./mentions.js";
+import { resolveMentions, stripMatrixMentionForCommand } from "./mentions.js";
 import { handleInboundMatrixReaction } from "./reaction-events.js";
 import { deliverMatrixReplies } from "./replies.js";
 import { createMatrixReplyContextResolver } from "./reply-context.js";
@@ -113,6 +115,15 @@ export type MatrixMonitorHandlerParams = {
   logVerboseMessage: (message: string) => void;
   allowFrom: string[];
   groupAllowFrom?: string[];
+  /**
+   * Subset of the startup-resolved `allowFrom` whose entries were already raw Matrix IDs
+   * in the original config (e.g. `@user:server`). The handler hot-reloads this portion
+   * from live config on every message so revocations/additions of raw IDs apply without
+   * a restart. Display-name entries stay frozen at startup.
+   */
+  rawIdAllowFrom?: string[];
+  /** Same role as `rawIdAllowFrom` but for the group allowlist. */
+  rawIdGroupAllowFrom?: string[];
   roomsConfig?: Record<string, MatrixRoomConfig>;
   accountAllowBots?: boolean | "mentions";
   configuredBotUserIds?: ReadonlySet<string>;
@@ -309,6 +320,8 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
     logVerboseMessage,
     allowFrom,
     groupAllowFrom = [],
+    rawIdAllowFrom = [],
+    rawIdGroupAllowFrom = [],
     roomsConfig,
     accountAllowBots,
     configuredBotUserIds = new Set<string>(),
@@ -588,10 +601,42 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
         };
         const storeAllowFrom = await readStoreAllowFrom();
         const roomUsers = roomConfig?.users ?? [];
+        // Hot-reload allowlist: re-read live config per message and merge raw Matrix IDs
+        // with the startup-resolved display-name portion. Only raw Matrix IDs
+        // (`@user:server`) hot-reload; display-name entries are frozen at startup
+        // because resolving them per message is expensive.
+        let liveAllowFrom = allowFrom;
+        let liveGroupAllowFrom = groupAllowFrom;
+        if (rawIdAllowFrom.length > 0 || rawIdGroupAllowFrom.length > 0) {
+          try {
+            const hotCfg = core.config.loadConfig() as CoreConfig;
+            const hotAccountCfg = resolveMatrixAccountConfig({
+              cfg: hotCfg,
+              accountId,
+            });
+            const extractLiveRawIds = (entries: Array<string | number>): string[] =>
+              entries
+                .map((entry) => String(entry).trim())
+                .filter((entry) => entry !== "" && entry !== "*" && isMatrixQualifiedUserId(entry))
+                .map((entry) => normalizeMatrixUserId(entry));
+            const hotDmRawIds = extractLiveRawIds(hotAccountCfg.dm?.allowFrom ?? []);
+            const hotGroupRawIds = extractLiveRawIds(hotAccountCfg.groupAllowFrom ?? []);
+            const startupRawDmSet = new Set(rawIdAllowFrom);
+            const startupRawGroupSet = new Set(rawIdGroupAllowFrom);
+            const frozenDm = allowFrom.filter((entry) => !startupRawDmSet.has(String(entry)));
+            const frozenGroup = groupAllowFrom.filter(
+              (entry) => !startupRawGroupSet.has(String(entry)),
+            );
+            liveAllowFrom = [...frozenDm, ...hotDmRawIds];
+            liveGroupAllowFrom = [...frozenGroup, ...hotGroupRawIds];
+          } catch (err) {
+            logVerboseMessage(`matrix: hot-reload allowlist failed (${String(err)})`);
+          }
+        }
         const accessState = resolveMatrixMonitorAccessState({
-          allowFrom,
+          allowFrom: liveAllowFrom,
           storeAllowFrom,
-          groupAllowFrom,
+          groupAllowFrom: liveGroupAllowFrom,
           roomUsers,
           senderId,
           isRoom,
@@ -811,8 +856,15 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
           surface: "matrix",
         });
         const useAccessGroups = cfg.commands?.useAccessGroups !== false;
-        const hasControlCommandInMessage = core.channel.text.hasControlCommand(
+        // Strip a leading bot mention so commands like `@bot /new` are detected as `/new`.
+        const commandPrecheckText = stripMatrixMentionForCommand(
           mentionPrecheckText,
+          selfUserId,
+          agentMentionRegexes,
+          selfDisplayName,
+        );
+        const hasControlCommandInMessage = core.channel.text.hasControlCommand(
+          commandPrecheckText,
           cfg,
         );
         const commandGate = resolveControlCommandGate({
@@ -970,10 +1022,20 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
                 body: bodyText,
                 timestamp: eventTs ?? undefined,
                 messageId: _messageId,
+                mediaPath: media?.path,
+                mediaType: media?.contentType,
               })
             : undefined;
         const inboundHistory = preparedTrigger?.history;
         const triggerSnapshot = preparedTrigger;
+        // Strip a leading bot mention so /commands embedded in `@bot /new` are detected;
+        // also exposed downstream via CommandBody so command parsers see the unprefixed text.
+        const commandBody = stripMatrixMentionForCommand(
+          bodyText,
+          selfUserId,
+          agentMentionRegexes,
+          selfDisplayName,
+        );
 
         return {
           route: _route,
@@ -989,6 +1051,7 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
           inboundHistory,
           senderName,
           bodyText,
+          commandBody,
           media,
           locationPayload,
           messageId: _messageId,
@@ -1042,6 +1105,7 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
         inboundHistory,
         senderName,
         bodyText,
+        commandBody,
         media,
         locationPayload,
         messageId: _messageId,
@@ -1160,7 +1224,7 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
       const ctxPayload = core.channel.reply.finalizeInboundContext({
         Body: body,
         RawBody: bodyText,
-        CommandBody: bodyText,
+        CommandBody: commandBody,
         InboundHistory: inboundHistory && inboundHistory.length > 0 ? inboundHistory : undefined,
         From: isDirectMessage ? `matrix:${senderId}` : `matrix:channel:${roomId}`,
         To: `room:${roomId}`,

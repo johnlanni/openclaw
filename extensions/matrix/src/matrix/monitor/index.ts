@@ -32,7 +32,9 @@ import {
   isMatrixReadySyncState,
   type MatrixSyncState,
 } from "../sync-state.js";
+import { isMatrixQualifiedUserId } from "../target-ids.js";
 import { createMatrixThreadBindingManager } from "../thread-bindings.js";
+import { normalizeMatrixUserId } from "./allowlist.js";
 import { registerMatrixAutoJoin } from "./auto-join.js";
 import { resolveMatrixMonitorConfig } from "./config.js";
 import { createDirectRoomTracker } from "./direct.js";
@@ -112,6 +114,17 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
   const accountAllowBots = accountConfig.allowBots;
   let allowFrom: string[] = (accountConfig.dm?.allowFrom ?? []).map(String);
   let groupAllowFrom: string[] = (accountConfig.groupAllowFrom ?? []).map(String);
+  // Capture raw Matrix IDs from the original config (before display-name resolution) so
+  // the handler can hot-reload just the raw-ID portion from live config per message.
+  // Display-name entries can't be cheaply re-resolved per message, so they stay frozen
+  // at startup; revoking those still requires a restart.
+  const extractRawMatrixIds = (entries: Array<string | number>): string[] =>
+    entries
+      .map((entry) => String(entry).trim())
+      .filter((entry) => entry !== "" && entry !== "*" && isMatrixQualifiedUserId(entry))
+      .map((entry) => normalizeMatrixUserId(entry));
+  const rawIdAllowFrom = extractRawMatrixIds(accountConfig.dm?.allowFrom ?? []);
+  const rawIdGroupAllowFrom = extractRawMatrixIds(accountConfig.groupAllowFrom ?? []);
   let roomsConfig = accountConfig.groups ?? accountConfig.rooms;
   let needsRoomAliasesForConfig = false;
   const configuredBotUserIds = resolveConfiguredMatrixBotUserIds({
@@ -244,7 +257,9 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
         : "off";
   const blockStreamingEnabled = accountConfig.blockStreaming === true;
   const startupMs = Date.now();
-  const startupGraceMs = 0;
+  // 1-minute grace window after startup: drop messages older than this to avoid replaying
+  // a large backlog when the gateway/process restarts.
+  const startupGraceMs = 60_000;
   const warnedEncryptedRooms = new Set<string>();
   const warnedCryptoMissingRooms = new Set<string>();
   let healthySyncSinceMs: number | undefined;
@@ -321,6 +336,8 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
       logVerboseMessage,
       allowFrom,
       groupAllowFrom,
+      rawIdAllowFrom,
+      rawIdGroupAllowFrom,
       roomsConfig,
       accountAllowBots,
       configuredBotUserIds,

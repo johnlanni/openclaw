@@ -179,3 +179,46 @@ export function resolveMentions(params: {
   const wasMentioned = explicitMention || textMentioned || visibleRoomMention;
   return { wasMentioned, hasExplicitMention: explicitMention };
 }
+
+/**
+ * Strip a leading bot mention prefix from message text so slash commands can be matched.
+ *
+ * Handles three forms at the start of the message:
+ *   - Matrix MXID prefix (`@user:server`)
+ *   - Bot display name prefix (e.g. `mathworker 💕: /stop` → `/stop`)
+ *   - Display-name mentions matched by the configured `mentionRegexes`
+ *
+ * Returns the original text untouched when nothing matches.
+ */
+export function stripMatrixMentionForCommand(
+  text: string,
+  selfUserId: string | null | undefined,
+  mentionRegexes: RegExp[],
+  selfDisplayName?: string | null,
+): string {
+  let result = text;
+
+  if (selfUserId) {
+    const escaped = selfUserId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    result = result.replace(new RegExp(`^${escaped}[:\\s]*`, "i"), "");
+  }
+
+  const trimmedDisplayName = selfDisplayName?.trim();
+  if (trimmedDisplayName) {
+    const escaped = trimmedDisplayName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    result = result.replace(new RegExp(`^${escaped}[:\\s]*`, "i"), "");
+  }
+
+  for (const re of mentionRegexes) {
+    const startRe = new RegExp(`^(?:${re.source})[:\\s]*`, re.flags);
+    const before = result;
+    result = result.replace(startRe, "");
+    if (result !== before) {
+      // Only strip the first matching display-name mention to keep behavior predictable
+      // when several patterns overlap (e.g. nickname plus full name).
+      break;
+    }
+  }
+
+  return result.trim();
+}
