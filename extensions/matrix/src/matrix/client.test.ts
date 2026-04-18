@@ -663,14 +663,29 @@ describe("Matrix auth/config live surfaces", () => {
   });
 
   it("accepts internal http homeservers only when private-network access is enabled", () => {
-    expect(() => validateMatrixHomeserverUrl("http://matrix-synapse:8008")).toThrow(
+    expect(() => validateMatrixHomeserverUrl("http://matrix-synapse.example.org:8008")).toThrow(
       "Matrix homeserver must use https:// unless it targets a private or loopback host",
     );
     expect(
-      validateMatrixHomeserverUrl("http://matrix-synapse:8008", {
+      validateMatrixHomeserverUrl("http://matrix-synapse.example.org:8008", {
         allowPrivateNetwork: true,
       }),
-    ).toBe("http://matrix-synapse:8008");
+    ).toBe("http://matrix-synapse.example.org:8008");
+  });
+
+  it("accepts single-label and .local/.internal http homeservers without an explicit opt-in", () => {
+    expect(validateMatrixHomeserverUrl("http://matrix-synapse:8008")).toBe(
+      "http://matrix-synapse:8008",
+    );
+    expect(validateMatrixHomeserverUrl("http://hiclaw-controller:6167")).toBe(
+      "http://hiclaw-controller:6167",
+    );
+    expect(validateMatrixHomeserverUrl("http://matrix.local:8008")).toBe(
+      "http://matrix.local:8008",
+    );
+    expect(validateMatrixHomeserverUrl("http://matrix.internal:8008")).toBe(
+      "http://matrix.internal:8008",
+    );
   });
 
   it("resolves an explicit proxy dispatcher from top-level Matrix config", () => {

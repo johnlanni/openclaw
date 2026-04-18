@@ -52,5 +52,18 @@ export function isPrivateOrLoopbackHost(host: string): boolean {
   if (family === 6) {
     return isPrivateIpv6(normalized);
   }
+  // Single-label hostnames (no dots) cannot be public DNS — they only resolve
+  // via local /etc/hosts, container DNS, mDNS, or NetBIOS. Treat them as
+  // private/loopback so container/Kubernetes service names like
+  // "matrix-synapse" or "hiclaw-controller" work without requiring an
+  // explicit dangerouslyAllowPrivateNetwork opt-in.
+  if (!normalized.includes(".")) {
+    return true;
+  }
+  // .local (mDNS / Bonjour) and .internal (RFC-reserved internal) suffixes
+  // are also non-public per IETF specs.
+  if (normalized.endsWith(".local") || normalized.endsWith(".internal")) {
+    return true;
+  }
   return false;
 }
