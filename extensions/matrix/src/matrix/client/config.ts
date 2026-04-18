@@ -580,9 +580,32 @@ export async function resolveValidatedMatrixHomeserverUrl(
   const normalized = validateMatrixHomeserverUrl(homeserver, {
     allowPrivateNetwork,
   });
+  // If the synchronous validator accepted this URL because its hostname is a
+  // private/loopback target (single-label hostname, .local/.internal,
+  // 127.0.0.0/8, RFC1918 ranges, ::1, fc00::/7, etc.), then the asynchronous
+  // SSRF guard should also accept it without requiring a separate
+  // dangerouslyAllowPrivateNetwork opt-in. Otherwise plain http:// homeservers
+  // on container/Kubernetes networks (e.g. http://hiclaw-controller:6167) get
+  // rejected by the DNS-resolved SSRF check even though they passed the URL
+  // shape validation.
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(normalized);
+  } catch {
+    throw new Error("Matrix homeserver must be a valid http(s) URL");
+  }
+  const effectiveAllowPrivateNetwork =
+    allowPrivateNetwork === true
+      ? true
+      : parsedUrl.protocol === "http:" && isPrivateOrLoopbackHost(parsedUrl.hostname)
+        ? true
+        : allowPrivateNetwork;
   await assertHttpUrlTargetsPrivateNetwork(normalized, {
-    dangerouslyAllowPrivateNetwork: opts?.dangerouslyAllowPrivateNetwork,
-    allowPrivateNetwork,
+    dangerouslyAllowPrivateNetwork:
+      typeof opts?.dangerouslyAllowPrivateNetwork === "boolean"
+        ? opts.dangerouslyAllowPrivateNetwork || effectiveAllowPrivateNetwork === true
+        : effectiveAllowPrivateNetwork,
+    allowPrivateNetwork: effectiveAllowPrivateNetwork,
     lookupFn: opts?.lookupFn,
     errorMessage: MATRIX_HTTP_HOMESERVER_ERROR,
   });

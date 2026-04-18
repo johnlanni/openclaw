@@ -752,6 +752,28 @@ describe("Matrix auth/config live surfaces", () => {
       }),
     ).resolves.toBe("http://localhost.localdomain:8008");
   });
+
+  it("accepts single-label and .local/.internal http homeservers without explicit opt-in", async () => {
+    // Container/Kubernetes service names resolve to private addresses via the
+    // pod DNS, but they aren't literal RFC1918 strings. The synchronous
+    // validator already trusts them, so the async DNS-resolved guard must be
+    // consistent and not require dangerouslyAllowPrivateNetwork separately.
+    await expect(
+      resolveValidatedMatrixHomeserverUrl("http://hiclaw-controller:6167", {
+        lookupFn: createLookupFn([{ address: "10.244.0.5", family: 4 }]),
+      }),
+    ).resolves.toBe("http://hiclaw-controller:6167");
+    await expect(
+      resolveValidatedMatrixHomeserverUrl("http://matrix.local:8008", {
+        lookupFn: createLookupFn([{ address: "192.168.1.10", family: 4 }]),
+      }),
+    ).resolves.toBe("http://matrix.local:8008");
+    await expect(
+      resolveValidatedMatrixHomeserverUrl("http://matrix.internal:8008", {
+        lookupFn: createLookupFn([{ address: "172.16.0.5", family: 4 }]),
+      }),
+    ).resolves.toBe("http://matrix.internal:8008");
+  });
 });
 
 describe("resolveMatrixAuth", () => {
