@@ -84,6 +84,12 @@ const ALLOW_FROM_STORE_CACHE_TTL_MS = 30_000;
 const PAIRING_REPLY_COOLDOWN_MS = 5 * 60_000;
 const MAX_TRACKED_PAIRING_REPLY_SENDERS = 512;
 const MAX_TRACKED_SHARED_DM_CONTEXT_NOTICES = 512;
+// Wrap inbound group history with these markers so the LLM gets a clear visual separator
+// between prior chat messages and the current trigger. Mirrors the core helpers in
+// `src/auto-reply/reply/history.ts` + `src/auto-reply/reply/mentions.ts`; defined locally
+// because neither marker is part of the public Plugin SDK contract.
+const HISTORY_CONTEXT_MARKER = "[Chat messages since your last reply - for context]";
+const CURRENT_MESSAGE_MARKER = "[Current message - respond to this]";
 type MatrixAllowBotsMode = "off" | "mentions" | "all";
 
 export class MatrixRetryableInboundError extends Error {
@@ -1221,9 +1227,22 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
         body: textWithId,
       });
       const groupSystemPrompt = normalizeOptionalString(roomConfig?.systemPrompt);
+      // Build a marker-wrapped BodyForAgent when prior group history is available so the
+      // LLM sees a clear "history vs current message" boundary in its main prompt context.
+      // InboundHistory is still populated as structured metadata for other consumers.
+      const bodyForAgent =
+        inboundHistory && inboundHistory.length > 0
+          ? `${HISTORY_CONTEXT_MARKER}\n${inboundHistory
+              .map((entry) => {
+                const mediaTag = entry.mediaType ? ` [media: ${entry.mediaType}]` : "";
+                return `${entry.sender}: ${entry.body}${mediaTag}`;
+              })
+              .join("\n")}\n\n${CURRENT_MESSAGE_MARKER}\n${bodyText}`
+          : undefined;
       const ctxPayload = core.channel.reply.finalizeInboundContext({
         Body: body,
         RawBody: bodyText,
+        BodyForAgent: bodyForAgent,
         CommandBody: commandBody,
         InboundHistory: inboundHistory && inboundHistory.length > 0 ? inboundHistory : undefined,
         From: isDirectMessage ? `matrix:${senderId}` : `matrix:channel:${roomId}`,
