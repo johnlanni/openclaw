@@ -410,19 +410,46 @@ function clampMatrixInitialSyncLimit(value: unknown): number | undefined {
 const MATRIX_HTTP_HOMESERVER_ERROR =
   "Matrix homeserver must use https:// unless it targets a private or loopback host";
 
+function homeserverImpliesPrivateNetwork(homeserver: string | undefined): boolean {
+  // When the configured Matrix homeserver itself targets a private/loopback host
+  // (single-label container service name, .local/.internal, RFC1918 IP, loopback,
+  // etc.), the runtime SSRF policy must allow private networks. Otherwise the
+  // matrix-js-sdk fetch path will reject every /sync to e.g.
+  // http://hiclaw-controller:6167 even though the synchronous URL validator
+  // already accepted it. Mirroring the validator's behavior here keeps both
+  // checks consistent and avoids forcing operators to also set
+  // dangerouslyAllowPrivateNetwork explicitly in config.
+  if (!homeserver) {
+    return false;
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(homeserver);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return false;
+  }
+  return isPrivateOrLoopbackHost(parsed.hostname);
+}
+
 function buildMatrixNetworkFields(params: {
   allowPrivateNetwork: boolean | undefined;
+  homeserver?: string;
   proxy?: string;
   dispatcherPolicy?: PinnedDispatcherPolicy;
 }): Pick<MatrixResolvedConfig, "allowPrivateNetwork" | "ssrfPolicy" | "dispatcherPolicy"> {
   const dispatcherPolicy: PinnedDispatcherPolicy | undefined =
     params.dispatcherPolicy ??
     (params.proxy ? { mode: "explicit-proxy", proxyUrl: params.proxy } : undefined);
-  if (!params.allowPrivateNetwork && !dispatcherPolicy) {
+  const allowPrivateNetwork =
+    params.allowPrivateNetwork === true || homeserverImpliesPrivateNetwork(params.homeserver);
+  if (!allowPrivateNetwork && !dispatcherPolicy) {
     return {};
   }
   return {
-    ...(params.allowPrivateNetwork
+    ...(allowPrivateNetwork
       ? {
           allowPrivateNetwork: true,
           ssrfPolicy: ssrfPolicyFromDangerouslyAllowPrivateNetwork(true),
@@ -682,6 +709,7 @@ export function resolveMatrixConfigForAccount(
     encryption,
     ...buildMatrixNetworkFields({
       allowPrivateNetwork,
+      homeserver: resolvedStrings.homeserver,
       proxy: account.proxy ?? matrix.proxy,
     }),
   };
@@ -830,6 +858,7 @@ export async function resolveMatrixAuth(params?: {
       encryption: resolved.encryption,
       ...buildMatrixNetworkFields({
         allowPrivateNetwork: resolved.allowPrivateNetwork,
+        homeserver,
         dispatcherPolicy: resolved.dispatcherPolicy,
       }),
     };
@@ -850,6 +879,7 @@ export async function resolveMatrixAuth(params?: {
       encryption: resolved.encryption,
       ...buildMatrixNetworkFields({
         allowPrivateNetwork: resolved.allowPrivateNetwork,
+        homeserver: cachedCredentials.homeserver,
         dispatcherPolicy: resolved.dispatcherPolicy,
       }),
     };
@@ -914,6 +944,7 @@ export async function resolveMatrixAuth(params?: {
     encryption: resolved.encryption,
     ...buildMatrixNetworkFields({
       allowPrivateNetwork: resolved.allowPrivateNetwork,
+      homeserver,
       dispatcherPolicy: resolved.dispatcherPolicy,
     }),
   };

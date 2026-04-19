@@ -1033,6 +1033,53 @@ describe("resolveMatrixAuth", () => {
     });
   });
 
+  it("auto-enables the private-network opt-in when the homeserver hostname is private/loopback", () => {
+    // Container/Kubernetes service names like http://hiclaw-controller:6167 are
+    // already accepted by the synchronous URL validator (single-label hostname is
+    // treated as private/loopback). The runtime SSRF policy must follow suit so
+    // matrix-js-sdk fetches don't get rejected and the sync session can reach
+    // PREPARED. Operators must not have to set channels.matrix.network as well.
+    for (const homeserver of [
+      "http://hiclaw-controller:6167",
+      "http://matrix.local:8008",
+      "http://matrix.internal:8008",
+      "http://10.244.0.5:8008",
+    ]) {
+      const cfg = {
+        channels: {
+          matrix: {
+            homeserver,
+            userId: "@manager:hiclaw.local",
+            accessToken: "tok-svc",
+            deviceId: "DEVICESVC",
+          },
+        },
+      } as CoreConfig;
+      const resolved = resolveMatrixConfigForAccount(cfg, "default", {} as NodeJS.ProcessEnv);
+      expect(resolved).toMatchObject({
+        homeserver,
+        allowPrivateNetwork: true,
+        ssrfPolicy: { allowPrivateNetwork: true },
+      });
+    }
+  });
+
+  it("does not auto-enable the private-network opt-in for public https homeservers", () => {
+    const cfg = {
+      channels: {
+        matrix: {
+          homeserver: "https://matrix.example.org",
+          userId: "@bot:example.org",
+          accessToken: "tok-pub",
+        },
+      },
+    } as CoreConfig;
+
+    const resolved = resolveMatrixConfigForAccount(cfg, "default", {} as NodeJS.ProcessEnv);
+    expect(resolved.allowPrivateNetwork).toBeUndefined();
+    expect(resolved.ssrfPolicy).toBeUndefined();
+  });
+
   it("resolves token-only non-default account userId from whoami instead of inheriting the base user", async () => {
     matrixDoRequestMock.mockResolvedValue({
       user_id: "@ops:example.org",
