@@ -320,7 +320,28 @@ export const matrixPlugin: ChannelPlugin<ResolvedMatrixAccount, MatrixProbe> =
         threads: true,
         media: true,
       },
-      reload: { configPrefixes: ["channels.matrix"] },
+      reload: {
+        configPrefixes: ["channels.matrix"],
+        // The matrix monitor handler hot-reloads these per message
+        // (see extensions/matrix/src/matrix/monitor/handler.ts ~line 685
+        // which re-reads `channels.matrix.dm.allowFrom` and
+        // `channels.matrix.groupAllowFrom` from live config on every
+        // incoming event). Treating writes to these paths as a full channel
+        // restart causes a multi-second client teardown that races with
+        // in-flight outbound `message`-tool calls and surfaces as
+        // "Matrix sync entered STOPPED during startup" — see the discussion
+        // in PR adding this comment for the full reproducer.
+        //
+        // Concretely this prevents needlessly restarting the matrix client
+        // every time the controller pushes an updated allowlist (e.g. when a
+        // new worker is provisioned and added to `groupAllowFrom`).
+        noopPrefixes: [
+          "channels.matrix.allowFrom",
+          "channels.matrix.dm.allowFrom",
+          "channels.matrix.groupAllowFrom",
+          "channels.matrix.groupAllowFromFallbackToAllowFrom",
+        ],
+      },
       configSchema: buildChannelConfigSchema(MatrixConfigSchema),
       config: {
         ...matrixConfigAdapter,

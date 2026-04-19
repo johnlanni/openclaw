@@ -118,18 +118,25 @@ function listReloadRules(): ReloadRule[] {
     return cachedReloadRules;
   }
   // Channel docking: plugins contribute hot reload/no-op prefixes here.
+  // `noopPrefixes` are emitted BEFORE `configPrefixes` so that a more-specific
+  // dynamic-read path (e.g. `channels.matrix.groupAllowFrom`, which the matrix
+  // monitor hot-reloads per message) can opt out of the broader
+  // `restart-channel:*` rule registered for `channels.matrix`. Without this
+  // ordering, first-match-wins in `matchRule` would always pick the broader
+  // hot rule and trigger an unnecessary (and racy) channel restart for what
+  // is a pure dynamic-read field.
   const channelReloadRules: ReloadRule[] = listChannelPlugins().flatMap((plugin) => [
+    ...(plugin.reload?.noopPrefixes ?? []).map(
+      (prefix): ReloadRule => ({
+        prefix,
+        kind: "none",
+      }),
+    ),
     ...(plugin.reload?.configPrefixes ?? []).map(
       (prefix): ReloadRule => ({
         prefix,
         kind: "hot",
         actions: [`restart-channel:${plugin.id}` as ReloadAction],
-      }),
-    ),
-    ...(plugin.reload?.noopPrefixes ?? []).map(
-      (prefix): ReloadRule => ({
-        prefix,
-        kind: "none",
       }),
     ),
   ]);

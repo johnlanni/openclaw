@@ -42,9 +42,19 @@ async function ensureResolvedClientReadiness(params: {
   client: MatrixClient;
   readiness?: MatrixRuntimeClientReadiness;
   preparedByDefault: boolean;
+  // True when the shared-client resolver already routed startup through
+  // `ensureSharedClientStarted` (which deduplicates concurrent `client.start()`
+  // calls via a single `startPromise`). When this is set, calling
+  // `client.start()` here would race with a concurrent monitor / channel
+  // restart and may cause matrix-js-sdk's `startClient()` to be invoked twice
+  // on the same instance, the second invocation implicitly stops the first
+  // and surfaces as "Matrix sync entered STOPPED during startup" in the loser.
+  startedBySharedResolver?: boolean;
 }): Promise<void> {
   if (params.readiness === "started") {
-    await params.client.start();
+    if (!params.startedBySharedResolver) {
+      await params.client.start();
+    }
     return;
   }
   if (params.readiness === "prepared" || (!params.readiness && params.preparedByDefault)) {
@@ -63,6 +73,14 @@ async function resolveRuntimeMatrixClient(opts: {
   cfg?: CoreConfig;
   timeoutMs?: number;
   accountId?: string | null;
+  // When the caller wants the resolved client to be fully started (i.e.
+  // `readiness: "started"`), set this to true so `acquireSharedMatrixClient`
+  // routes startup through the shared `startPromise`-deduplicated path
+  // instead of having the caller invoke `client.start()` separately. This is
+  // critical to avoid racing with the monitor channel's startup on the same
+  // shared client instance, which would otherwise emit a transient `STOPPED`
+  // and surface to one of the racers as a startup failure.
+  startSharedClient?: boolean;
   onResolved?: MatrixResolvedClientHook;
 }): Promise<ResolvedRuntimeMatrixClient> {
   ensureMatrixNodeRuntime();
@@ -87,7 +105,7 @@ async function resolveRuntimeMatrixClient(opts: {
     cfg,
     timeoutMs: opts.timeoutMs,
     accountId: authContext.accountId,
-    startClient: false,
+    startClient: opts.startSharedClient === true,
   });
   try {
     await opts.onResolved?.(client, { preparedByDefault: true });
@@ -111,16 +129,23 @@ export async function resolveRuntimeMatrixClientWithReadiness(opts: {
   accountId?: string | null;
   readiness?: MatrixRuntimeClientReadiness;
 }): Promise<ResolvedRuntimeMatrixClient> {
+  const startedReadiness = opts.readiness === "started";
   return await resolveRuntimeMatrixClient({
     client: opts.client,
     cfg: opts.cfg,
     timeoutMs: opts.timeoutMs,
     accountId: opts.accountId,
+    startSharedClient: startedReadiness,
     onResolved: async (client, context) => {
       await ensureResolvedClientReadiness({
         client,
         readiness: opts.readiness,
         preparedByDefault: context.preparedByDefault,
+        // Only the freshly-acquired shared client path actually started the
+        // client via `acquireSharedMatrixClient({ startClient: true })`. For
+        // user-supplied or already-active clients, fall back to the explicit
+        // `client.start()` (which is a guarded no-op if `started === true`).
+        startedBySharedResolver: startedReadiness && context.preparedByDefault,
       });
     },
   });
