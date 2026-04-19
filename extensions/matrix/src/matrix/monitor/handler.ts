@@ -14,6 +14,7 @@ import type {
   ReplyToMode,
 } from "../../types.js";
 import { resolveMatrixAccountConfig } from "../account-config.js";
+import { matrixTraceEvent } from "../debug-trace.js";
 import { createMatrixDraftStream } from "../draft-stream.js";
 import { formatMatrixErrorMessage } from "../errors.js";
 import { isMatrixMediaSizeLimitError } from "../media-errors.js";
@@ -439,10 +440,29 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
     let claimedInboundEvent = false;
     let draftStreamRef: ReturnType<typeof createMatrixDraftStream> | undefined;
     let draftConsumed = false;
+    matrixTraceEvent("monitor.handler", "received", {
+      accountId,
+      roomId,
+      eventId: event.event_id ?? null,
+      type: event.type,
+      sender: event.sender ?? null,
+      hasContent: typeof event.content === "object" && event.content !== null,
+      msgtype: ((event.content as { msgtype?: unknown } | undefined)?.msgtype ?? null) as
+        | string
+        | null,
+      origin_ts: typeof event.origin_server_ts === "number" ? event.origin_server_ts : null,
+      age: typeof event.unsigned?.age === "number" ? event.unsigned?.age : null,
+      redacted: !!event.unsigned?.redacted_because,
+    });
     try {
       const eventType = event.type;
       if (eventType === EventType.RoomMessageEncrypted) {
         // Encrypted payloads are emitted separately after decryption.
+        matrixTraceEvent("monitor.handler", "skip_encrypted_unhandled", {
+          accountId,
+          roomId,
+          eventId: event.event_id ?? null,
+        });
         return;
       }
 
@@ -458,16 +478,32 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
         !isLocationEvent &&
         !isReactionEvent
       ) {
+        matrixTraceEvent("monitor.handler", "skip_unsupported_type", {
+          accountId,
+          roomId,
+          eventId: event.event_id ?? null,
+          type: eventType,
+        });
         return;
       }
       logVerboseMessage(
         `matrix: inbound event room=${roomId} type=${eventType} id=${event.event_id ?? "unknown"}`,
       );
       if (event.unsigned?.redacted_because) {
+        matrixTraceEvent("monitor.handler", "skip_redacted", {
+          accountId,
+          roomId,
+          eventId: event.event_id ?? null,
+        });
         return;
       }
       const senderId = event.sender;
       if (!senderId) {
+        matrixTraceEvent("monitor.handler", "skip_no_sender", {
+          accountId,
+          roomId,
+          eventId: event.event_id ?? null,
+        });
         return;
       }
       const eventTs = event.origin_server_ts;
@@ -482,10 +518,25 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
       const readIngressPrefix = async () => {
         const selfUserId = await client.getUserId();
         if (senderId === selfUserId) {
+          matrixTraceEvent("monitor.handler", "skip_self_sender", {
+            accountId,
+            roomId,
+            eventId: event.event_id ?? null,
+            sender: senderId,
+            selfUserId,
+          });
           return undefined;
         }
         if (dropPreStartupMessages) {
           if (typeof eventTs === "number" && eventTs < startupMs - startupGraceMs) {
+            matrixTraceEvent("monitor.handler", "skip_pre_startup", {
+              accountId,
+              roomId,
+              eventId: event.event_id ?? null,
+              eventTs,
+              startupMs,
+              startupGraceMs,
+            });
             return undefined;
           }
           if (
@@ -493,6 +544,13 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
             typeof eventAge === "number" &&
             eventAge > startupGraceMs
           ) {
+            matrixTraceEvent("monitor.handler", "skip_pre_startup_by_age", {
+              accountId,
+              roomId,
+              eventId: event.event_id ?? null,
+              eventAge,
+              startupGraceMs,
+            });
             return undefined;
           }
         }
@@ -506,6 +564,11 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
             body: content.body,
           })
         ) {
+          matrixTraceEvent("monitor.handler", "skip_verification_msg", {
+            accountId,
+            roomId,
+            eventId: event.event_id ?? null,
+          });
           logVerboseMessage(`matrix: skip verification/system room message room=${roomId}`);
           return undefined;
         }
@@ -517,11 +580,21 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
 
         const relates = content["m.relates_to"];
         if (relates && "rel_type" in relates && relates.rel_type === RelationType.Replace) {
+          matrixTraceEvent("monitor.handler", "skip_edit_replace", {
+            accountId,
+            roomId,
+            eventId: event.event_id ?? null,
+          });
           return undefined;
         }
         if (eventId && inboundDeduper) {
           claimedInboundEvent = inboundDeduper.claimEvent({ roomId, eventId });
           if (!claimedInboundEvent) {
+            matrixTraceEvent("monitor.handler", "skip_duplicate", {
+              accountId,
+              roomId,
+              eventId,
+            });
             logVerboseMessage(`matrix: skip duplicate inbound event room=${roomId} id=${eventId}`);
             return undefined;
           }
@@ -629,10 +702,8 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
             const hotGroupRawIds = extractLiveRawIds(hotAccountCfg.groupAllowFrom ?? []);
             const startupRawDmSet = new Set(rawIdAllowFrom);
             const startupRawGroupSet = new Set(rawIdGroupAllowFrom);
-            const frozenDm = allowFrom.filter((entry) => !startupRawDmSet.has(String(entry)));
-            const frozenGroup = groupAllowFrom.filter(
-              (entry) => !startupRawGroupSet.has(String(entry)),
-            );
+            const frozenDm = allowFrom.filter((entry) => !startupRawDmSet.has(entry));
+            const frozenGroup = groupAllowFrom.filter((entry) => !startupRawGroupSet.has(entry));
             liveAllowFrom = [...frozenDm, ...hotDmRawIds];
             liveGroupAllowFrom = [...frozenGroup, ...hotGroupRawIds];
           } catch (err) {
@@ -1676,9 +1747,23 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
           onIdle: typingCallbacks.onIdle,
         });
 
+      matrixTraceEvent("monitor.handler", "dispatch_begin", {
+        accountId,
+        roomId,
+        eventId: event.event_id ?? null,
+        sender: senderId,
+      });
+      const dispatchStartedAt = Date.now();
       const { queuedFinal, counts } = await core.channel.reply.withReplyDispatcher({
         dispatcher,
         onSettled: () => {
+          matrixTraceEvent("monitor.handler", "dispatch_settled", {
+            accountId,
+            roomId,
+            eventId: event.event_id ?? null,
+            sender: senderId,
+            elapsedMs: Date.now() - dispatchStartedAt,
+          });
           markDispatchIdle();
         },
         run: async () => {

@@ -15,6 +15,7 @@ import type { SsrFPolicy } from "../runtime-api.js";
 import { resolveMatrixRoomKeyBackupReadinessError } from "./backup-health.js";
 import { FileBackedMatrixSyncStore } from "./client/file-sync-store.js";
 import { createMatrixJsSdkClientLogger } from "./client/logging.js";
+import { matrixTraceEvent } from "./debug-trace.js";
 import {
   formatMatrixErrorMessage,
   formatMatrixErrorReason,
@@ -186,6 +187,26 @@ async function loadMatrixCryptoRuntime(): Promise<MatrixCryptoRuntime> {
 
 const normalizeOptionalString = normalizeNullableString;
 
+// Safe stringifier for unknown values that might be Errors, plain objects,
+// strings, or anything else. Used by matrixTraceEvent payloads where we
+// can't rely on the value implementing toString sensibly.
+function errorMessage(err: unknown): string | null {
+  if (err === undefined || err === null) {
+    return null;
+  }
+  if (err instanceof Error) {
+    return err.message;
+  }
+  if (typeof err === "string") {
+    return err;
+  }
+  try {
+    return JSON.stringify(err);
+  } catch {
+    return null;
+  }
+}
+
 function isUnsupportedAuthenticatedMediaEndpointError(err: unknown): boolean {
   const statusCode = (err as { statusCode?: number })?.statusCode;
   if (statusCode === 404 || statusCode === 405 || statusCode === 501) {
@@ -225,6 +246,7 @@ export class MatrixClient {
     | import("./sdk/crypto-bootstrap.js").MatrixCryptoBootstrapper<MatrixRawEvent>
     | undefined;
   private readonly autoBootstrapCrypto: boolean;
+  private readonly homeserverBaseUrl: string;
   private stopPersistPromise: Promise<void> | null = null;
   private verificationSummaryListenerBound = false;
   private currentSyncState: MatrixSyncState | null = null;
@@ -257,6 +279,7 @@ export class MatrixClient {
       dispatcherPolicy?: PinnedDispatcherPolicy;
     } = {},
   ) {
+    this.homeserverBaseUrl = homeserver;
     this.httpClient = new MatrixAuthedHttpClient({
       homeserver,
       accessToken,
@@ -430,6 +453,13 @@ export class MatrixClient {
       };
 
       const onSyncState = (state: MatrixSyncState, _prevState: string | null, error?: unknown) => {
+        matrixTraceEvent("sdk.wait-initial-sync", "transition", {
+          userId: this.selfUserId ?? null,
+          homeserver: this.homeserverBaseUrl,
+          state,
+          prevState: _prevState,
+          error: errorMessage(error),
+        });
         if (isMatrixReadySyncState(state)) {
           settleResolve();
           return;
@@ -461,6 +491,12 @@ export class MatrixClient {
       }
       abortSignal?.addEventListener("abort", onAbort, { once: true });
       timeoutId = setTimeout(() => {
+        matrixTraceEvent("sdk.wait-initial-sync", "timeout", {
+          userId: this.selfUserId ?? null,
+          homeserver: this.homeserverBaseUrl,
+          timeoutMs,
+          lastSyncState: this.currentSyncState ?? null,
+        });
         settleReject(
           new Error(`Matrix client did not reach a ready sync state within ${timeoutMs}ms`),
         );
@@ -475,30 +511,82 @@ export class MatrixClient {
     readyTimeoutMs?: number;
   }): Promise<void> {
     if (this.started) {
+      matrixTraceEvent("sdk.start", "noop_already_started", {
+        userId: this.selfUserId ?? null,
+        homeserver: this.homeserverBaseUrl ?? null,
+      });
       return;
     }
 
-    throwIfMatrixStartupAborted(opts.abortSignal);
-    await this.ensureCryptoSupportInitialized();
-    throwIfMatrixStartupAborted(opts.abortSignal);
-    this.registerBridge();
-    await this.initializeCryptoIfNeeded(opts.abortSignal);
-
-    await this.client.startClient({
+    const traceContext = {
+      userId: this.selfUserId ?? null,
+      homeserver: this.homeserverBaseUrl ?? null,
+      encryption: this.encryptionEnabled,
+      autoBootstrapCrypto: this.autoBootstrapCrypto,
       initialSyncLimit: this.initialSyncLimit,
-    });
-    await this.waitForInitialSyncReady({
-      abortSignal: opts.abortSignal,
-      timeoutMs: opts.readyTimeoutMs,
-    });
-    throwIfMatrixStartupAborted(opts.abortSignal);
-    if (opts.bootstrapCrypto && this.autoBootstrapCrypto) {
-      await this.bootstrapCryptoIfNeeded(opts.abortSignal);
+      bootstrapCrypto: opts.bootstrapCrypto,
+    };
+    const startedAt = Date.now();
+    matrixTraceEvent("sdk.start", "begin", traceContext);
+
+    try {
+      throwIfMatrixStartupAborted(opts.abortSignal);
+      await this.ensureCryptoSupportInitialized();
+      matrixTraceEvent("sdk.start", "crypto_support_ready", {
+        ...traceContext,
+        elapsedMs: Date.now() - startedAt,
+      });
+      throwIfMatrixStartupAborted(opts.abortSignal);
+      this.registerBridge();
+      await this.initializeCryptoIfNeeded(opts.abortSignal);
+      matrixTraceEvent("sdk.start", "crypto_initialized", {
+        ...traceContext,
+        cryptoInitialized: this.cryptoInitialized,
+        elapsedMs: Date.now() - startedAt,
+      });
+
+      await this.client.startClient({
+        initialSyncLimit: this.initialSyncLimit,
+      });
+      matrixTraceEvent("sdk.start", "client_started", {
+        ...traceContext,
+        elapsedMs: Date.now() - startedAt,
+      });
+      await this.waitForInitialSyncReady({
+        abortSignal: opts.abortSignal,
+        timeoutMs: opts.readyTimeoutMs,
+      });
+      matrixTraceEvent("sdk.start", "initial_sync_ready", {
+        ...traceContext,
+        syncState: this.currentSyncState ?? null,
+        elapsedMs: Date.now() - startedAt,
+      });
+      throwIfMatrixStartupAborted(opts.abortSignal);
+      if (opts.bootstrapCrypto && this.autoBootstrapCrypto) {
+        await this.bootstrapCryptoIfNeeded(opts.abortSignal);
+        matrixTraceEvent("sdk.start", "crypto_bootstrapped", {
+          ...traceContext,
+          elapsedMs: Date.now() - startedAt,
+        });
+      }
+      throwIfMatrixStartupAborted(opts.abortSignal);
+      this.started = true;
+      this.emitOutstandingInviteEvents();
+      await this.refreshDmCache().catch(noop);
+      matrixTraceEvent("sdk.start", "complete", {
+        ...traceContext,
+        syncState: this.currentSyncState ?? null,
+        elapsedMs: Date.now() - startedAt,
+      });
+    } catch (err) {
+      matrixTraceEvent("sdk.start", "failed", {
+        ...traceContext,
+        elapsedMs: Date.now() - startedAt,
+        error: err instanceof Error ? err.message : String(err),
+        errorName: err instanceof Error ? err.name : null,
+      });
+      throw err;
     }
-    throwIfMatrixStartupAborted(opts.abortSignal);
-    this.started = true;
-    this.emitOutstandingInviteEvents();
-    await this.refreshDmCache().catch(noop);
   }
 
   async prepareForOneOff(): Promise<void> {
@@ -1673,6 +1761,15 @@ export class MatrixClient {
 
       const raw = matrixEventToRaw(event);
       const isEncryptedEvent = raw.type === "m.room.encrypted";
+      matrixTraceEvent("sdk.client-event", "received", {
+        userId: this.selfUserId ?? null,
+        roomId,
+        eventId: raw.event_id ?? null,
+        type: raw.type,
+        sender: raw.sender ?? null,
+        encrypted: isEncryptedEvent,
+        stateKey: raw.state_key ?? null,
+      });
       this.emitter.emit("room.event", roomId, raw);
       if (isEncryptedEvent) {
         this.emitter.emit("room.encrypted_event", roomId, raw);
@@ -1690,8 +1787,19 @@ export class MatrixClient {
           : undefined;
       if (stateKey && selfUserId && stateKey === selfUserId) {
         if (membership === "invite") {
+          matrixTraceEvent("sdk.membership", "invited", {
+            userId: selfUserId,
+            roomId,
+            sender: raw.sender ?? null,
+            eventId: raw.event_id ?? null,
+          });
           this.emitter.emit("room.invite", roomId, raw);
         } else if (membership === "join") {
+          matrixTraceEvent("sdk.membership", "joined", {
+            userId: selfUserId,
+            roomId,
+            eventId: raw.event_id ?? null,
+          });
           this.emitter.emit("room.join", roomId, raw);
         }
       }
@@ -1713,10 +1821,23 @@ export class MatrixClient {
           data && typeof data === "object" && "error" in data
             ? (data as { error?: unknown }).error
             : undefined;
+        matrixTraceEvent("sdk.sync", "transition", {
+          userId: this.selfUserId ?? null,
+          homeserver: this.homeserverBaseUrl,
+          state,
+          prevState,
+          error: errorMessage(error),
+        });
         this.emitter.emit("sync.state", state, prevState, error);
       },
     );
     this.client.on(ClientEvent.SyncUnexpectedError, (error: Error) => {
+      matrixTraceEvent("sdk.sync", "unexpected_error", {
+        userId: this.selfUserId ?? null,
+        homeserver: this.homeserverBaseUrl,
+        error: error.message,
+        errorName: error.name,
+      });
       this.emitter.emit("sync.unexpected_error", error);
     });
   }
